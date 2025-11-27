@@ -1,0 +1,75 @@
+# ============================================
+# Node / Backend / Frontend
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Lockfiles (opcional — remove se quiser versionar)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+
+# ============================================
+# Build / Dist
+# ============================================
+dist/
+build/
+.cache/
+.vite/
+vite.config.timestamp-*.js
+
+# Vue specific
+*.local
+*.temp
+
+# ============================================
+# Environment Files
+# ============================================
+.env
+.env.local
+.env.*.local
+
+# Prisma
+backend/prisma/migrations/
+backend/prisma/dev.db
+*.db-journal
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+log.txt
+
+# ============================================
+# OS generated files
+# ============================================
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Docker
+# ============================================
+**/Dockerfile~
+**/docker-compose.yml~
+
+# ============================================
+# Editor / IDE
+# ============================================
+.vscode/
+.idea/
+*.sw*
+*.swo
+*.swn
+*.swp
+
+# ============================================
+# Temporary files
+# ============================================
+tmp/
+temp/
+*.tmp
