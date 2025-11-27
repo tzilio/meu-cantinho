@@ -1,0 +1,55 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Usuario {
+  id     Int    @id @default(autoincrement())
+  nome   String
+  email  String @unique
+  senha  String
+}
+
+model Espaco {
+  id         Int       @id @default(autoincrement())
+  nome       String
+  capacidade Int
+  preco      Float
+  fotos      String[]
+  reservas   Reserva[]
+}
+
+model Reserva {
+  id              Int        @id @default(autoincrement())
+  data            DateTime
+  cliente         String
+  valorPago       Float
+  statusPagamento StatusPagamento
+  espacoId        Int
+  espaco          Espaco     @relation(fields: [espacoId], references: [id])
+  pagamento       Pagamento?
+}
+
+model Pagamento {
+  id        Int      @id @default(autoincrement())
+  reservaId Int      @unique
+  valor     Float
+  tipo      TipoPagamento
+  data      DateTime
+  reserva   Reserva  @relation(fields: [reservaId], references: [id])
+}
+
+enum StatusPagamento {
+  SINAL
+  QUITADO
+}
+
+enum TipoPagamento {
+  PIX
+  CARTAO
+  DINHEIRO
+}

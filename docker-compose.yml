@@ -1,0 +1,48 @@
+version: '3.9'
+
+services:
+
+  db:
+    image: postgres:16
+    container_name: sc_db
+    restart: always
+    environment:
+      POSTGRES_USER: sc
+      POSTGRES_PASSWORD: sc
+      POSTGRES_DB: sc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - scnet
+
+  backend:
+    build: ./backend
+    container_name: sc_backend
+    restart: always
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://sc:sc@db:5432/sc
+    ports:
+      - "3000:3000"
+    networks:
+      - scnet
+
+  frontend:
+    build: ./frontend
+    container_name: sc_frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    networks:
+      - scnet
+
+networks:
+  scnet:
+
+volumes:
+  pgdata:
