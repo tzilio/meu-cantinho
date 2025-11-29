@@ -3,13 +3,15 @@ import App from './App.vue';
 import router from './router';
 import 'vuetify/styles';
 import { createVuetify } from 'vuetify';
-import { aliases, md } from 'vuetify/iconsets/md';
+import { aliases, mdi } from 'vuetify/iconsets/mdi';
+import '@mdi/font/css/materialdesignicons.css';
+
 
 const vuetify = createVuetify({
   icons: {
-    defaultSet: 'md',
+    defaultSet: 'mdi',
     aliases,
-    sets: { md }
+    sets: { mdi }
   },
   theme: {
     defaultTheme: 'light'
