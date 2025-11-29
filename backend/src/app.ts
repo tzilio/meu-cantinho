@@ -1,0 +1,41 @@
+// backend/src/services/app.ts
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './swagger';
+import router from '../infrastructure/http/routes/index.js'; // NodeNext -> .js
+
+const app = express();
+
+// Middlewares básicos
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Health check
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Rotas principais
+app.use('/', router);
+
+// Swagger UI
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
+
+// 404 handler
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    error: 'NotFound',
+    message: `Rota não encontrada: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Tratamento genérico de erros
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const status = (err as any)?.statusCode || 500;
+  const message = (err as any)?.message || 'Erro interno no servidor';
+  res.status(status).json({ error: 'InternalError', message });
+});
+
+export default app;

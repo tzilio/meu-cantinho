@@ -11,9 +11,10 @@ services:
       POSTGRES_PASSWORD: sc
       POSTGRES_DB: sc
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - scnet
 
