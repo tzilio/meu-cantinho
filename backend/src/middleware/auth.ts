@@ -57,7 +57,7 @@ export function tokenValidation(optional = false) {
 /**
  * Middleware de autorização por papel.
  * Exemplo:
- *   router.get('/users', tokenValidation(), authorize('ADMIN', 'MANAGER'), handler);
+ *   router.get('/customers', tokenValidation(), authorize('ADMIN', 'MANAGER'), handler);
  */
 export function authorize(...allowedRoles: AuthRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {

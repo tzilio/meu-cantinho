@@ -171,7 +171,7 @@ export const createReservation = async (req: Request, res: Response) => {
 
     // Confere cliente
     const customerCheck = await pool.query(
-      'SELECT id FROM users WHERE id = $1',
+      'SELECT id FROM customers WHERE id = $1',
       [customer_id],
     );
     if (customerCheck.rowCount === 0) {

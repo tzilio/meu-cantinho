@@ -46,7 +46,7 @@ export interface Space {
 
 // ===================================
 // User
-// schema: users
+// schema: customer
 // ===================================
 export type UserRole = 'CUSTOMER' | 'ADMIN' | 'MANAGER';
 

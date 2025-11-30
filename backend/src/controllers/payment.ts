@@ -465,7 +465,7 @@ export const listPayments = async (req: Request, res: Response) => {
       JOIN reservations r ON r.id = p.reservation_id
       JOIN spaces       s ON s.id = r.space_id
       JOIN branches     b ON b.id = r.branch_id
-      JOIN users        u ON u.id = r.customer_id
+      JOIN customers        u ON u.id = r.customer_id
     `;
 
     const conditions: string[] = [];

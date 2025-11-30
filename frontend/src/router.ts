@@ -10,7 +10,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/branches' },
   { path: '/branches', component: BranchesView },
   { path: '/spaces', component: SpacesView },
-  { path: '/users', component: CustomersView },
+  { path: '/customers', component: CustomersView },
   { path: '/reservations', component: ReservationsView },
   { path: '/payments', component: PaymentsView }
 ];

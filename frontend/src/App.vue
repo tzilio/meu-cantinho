@@ -21,7 +21,7 @@
       </v-btn>
 
       <!-- Usuários / Clientes -->
-      <v-btn variant="text" to="/users" router>
+      <v-btn variant="text" to="/customers" router>
         Clientes
       </v-btn>
     </v-app-bar>
