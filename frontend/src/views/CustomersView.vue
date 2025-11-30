@@ -1,63 +1,97 @@
 <template>
-  <v-container>
+  <v-container class="py-8" fluid>
+
+    <!-- CABEÇALHO -->
     <v-row class="mb-4">
       <v-col cols="12" md="6">
-        <h2>Clientes</h2>
+        <h1 class="text-h4 font-weight-medium mb-1">Clientes</h1>
+        <p class="text-body-2 text-medium-emphasis mb-0">
+          Cadastre novos clientes e gerencie os existentes.
+        </p>
       </v-col>
+
       <v-col cols="12" md="6">
         <v-text-field
           v-model="search"
           label="Buscar por nome ou e-mail"
-          density="compact"
-          variant="outlined"
           prepend-inner-icon="mdi-magnify"
+          variant="outlined"
+          density="comfortable"
+          hide-details="auto"
+          class="mb-3"
           @keyup.enter="fetchCustomers"
         />
       </v-col>
     </v-row>
 
-    <v-row>
-      <!-- Novo cliente -->
+    <v-row align="start" dense>
+      <!-- NOVO CLIENTE -->
       <v-col cols="12" md="5">
-        <v-card>
-          <v-card-title class="text-subtitle-1">Novo cliente</v-card-title>
+        <v-card elevation="2">
+          <v-card-title class="text-subtitle-1 font-weight-medium">
+            Novo cliente
+          </v-card-title>
+
           <v-card-text>
             <v-form @submit.prevent="createCustomer">
+
               <v-text-field
                 v-model="customerForm.name"
                 label="Nome"
-                required
-                variant="outlined"
+                density="comfortable"
+                :rules="[rules.required]"
+                clearable
+                class="mb-3"
               />
+
               <v-text-field
                 v-model="customerForm.email"
                 label="E-mail"
-                required
-                variant="outlined"
+                density="comfortable"
+                :rules="[rules.required, rules.email]"
+                clearable
+                class="mb-3"
               />
+
               <v-text-field
                 v-model="customerForm.phone"
                 label="Telefone"
-                variant="outlined"
+                density="comfortable"
+                clearable
+                :rules="[rules.phone]"
+                class="mb-3"
+                @input="onPhoneInputNew"
               />
+
               <v-text-field
                 v-model="customerForm.password"
-                label="Senha (para acesso do cliente)"
-                type="password"
-                required
-                variant="outlined"
+                :type="showPassword ? 'text' : 'password'"
+                label="Senha de acesso"
+                density="comfortable"
+                :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+                @click:append-inner="toggleShowPassword"
+                :rules="[rules.required]"
+                clearable
+                class="mb-4"
               />
-              <v-btn type="submit" color="primary" class="mt-2">
+
+              <v-btn
+                type="submit"
+                block
+                color="primary"
+                class="text-none"
+              >
                 Salvar
               </v-btn>
+
             </v-form>
           </v-card-text>
         </v-card>
       </v-col>
 
-      <!-- Lista de clientes -->
+      <!-- LISTA -->
       <v-col cols="12" md="7">
-        <v-card>
+        <v-card elevation="2">
           <v-card-title class="text-subtitle-1 d-flex align-center">
             Clientes cadastrados
             <v-spacer />
@@ -71,19 +105,18 @@
             item-key="id"
           >
             <template #item.actions="{ item }">
-              <!-- aqui item já é um Customer -->
               <v-btn
                 icon="mdi-pencil-outline"
                 size="small"
                 variant="text"
-                @click="startEdit(item as Customer)"
+                @click="startEdit(item)"
               />
               <v-btn
                 icon="mdi-delete-outline"
                 size="small"
                 variant="text"
                 color="error"
-                @click="removeCustomer(item as Customer)"
+                @click="removeCustomer(item)"
               />
             </template>
 
@@ -97,55 +130,65 @@
       </v-col>
     </v-row>
 
-    <!-- Diálogo de edição de cliente -->
+    <!-- DIÁLOGO DE EDIÇÃO -->
     <v-dialog v-model="editDialog" max-width="500">
       <v-card v-if="editCustomer">
-        <v-card-title class="text-subtitle-1">
+        <v-card-title class="text-subtitle-1 font-weight-medium">
           Editar cliente
         </v-card-title>
+
         <v-card-text>
           <v-form @submit.prevent="updateCustomer">
+
             <v-text-field
               v-model="editCustomer.name"
               label="Nome"
-              required
-              variant="outlined"
+              density="comfortable"
+              :rules="[rules.required]"
+              clearable
+              class="mb-3"
             />
+
             <v-text-field
               v-model="editCustomer.email"
               label="E-mail"
-              required
-              variant="outlined"
+              density="comfortable"
+              :rules="[rules.required, rules.email]"
+              clearable
+              class="mb-3"
             />
+
             <v-text-field
               v-model="editCustomer.phone"
               label="Telefone"
-              variant="outlined"
+              density="comfortable"
+              clearable
+              class="mb-3"
+              :rules="[rules.phone]"
+              @input="onPhoneInputEdit"
             />
+
           </v-form>
         </v-card-text>
+
         <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="closeEdit">
-            Cancelar
-          </v-btn>
-          <v-btn color="primary" @click="updateCustomer">
-            Salvar
-          </v-btn>
+          <v-btn variant="text" @click="closeEdit">Cancelar</v-btn>
+          <v-btn color="primary" class="text-none" @click="updateCustomer">Salvar</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
+
   </v-container>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { http } from '@/services/http';
 import type { Customer } from '@/types';
 
 const customers = ref<Customer[]>([]);
 const search = ref('');
 
-// form de novo cliente
 const customerForm = ref({
   name: '',
   email: '',
@@ -153,10 +196,44 @@ const customerForm = ref({
   password: ''
 });
 
-// cliente em edição
 const editCustomer = ref<Customer | null>(null);
 const editDialog = ref(false);
 
+const showPassword = ref(false);
+
+/* -------------------- VALIDACOES -------------------- */
+const rules = {
+  required: (v: any) => !!v || 'Campo obrigatório',
+  email: (v: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || 'E-mail inválido',
+  phone: (v: string) =>
+    !v || v.replace(/\D/g, '').length >= 10 || 'Telefone incompleto'
+};
+
+/* -------------------- MÁSCARA DE TELEFONE -------------------- */
+function phoneMask(v: string): string {
+  if (!v) return '';
+  v = v.replace(/\D/g, '');
+  if (v.length <= 2) return `(${v}`;
+  if (v.length <= 7) return `(${v.slice(0, 2)}) ${v.slice(2)}`;
+  return `(${v.slice(0, 2)}) ${v.slice(2, 7)}-${v.slice(7, 11)}`;
+}
+
+function onPhoneInputNew() {
+  customerForm.value.phone = phoneMask(customerForm.value.phone);
+}
+
+function onPhoneInputEdit() {
+  if (!editCustomer.value) return;
+  editCustomer.value.phone = phoneMask(editCustomer.value.phone);
+}
+
+/* -------------------- MOSTRAR/OCULTAR SENHA -------------------- */
+function toggleShowPassword() {
+  showPassword.value = !showPassword.value;
+}
+
+/* -------------------- TABELA -------------------- */
 const headers = [
   { title: 'Nome', key: 'name' },
   { title: 'E-mail', key: 'email' },
@@ -164,15 +241,10 @@ const headers = [
   { title: 'Ações', key: 'actions', sortable: false }
 ];
 
+/* -------------------- API -------------------- */
 async function fetchCustomers() {
   const params: Record<string, string> = {};
-
-  // se seu back usa "q" em vez de "search", é só trocar aqui
-  if (search.value.trim()) {
-    params.search = search.value.trim();
-    // ou: params.q = search.value.trim();
-  }
-
+  if (search.value.trim()) params.search = search.value.trim();
   const { data } = await http.get<Customer[]>('/customers', { params });
   customers.value = data;
 }
@@ -182,16 +254,12 @@ async function createCustomer() {
     !customerForm.value.name.trim() ||
     !customerForm.value.email.trim() ||
     !customerForm.value.password.trim()
-  ) {
-    return;
-  }
+  ) return;
 
   await http.post('/customers', {
     name: customerForm.value.name.trim(),
     email: customerForm.value.email.trim(),
     phone: customerForm.value.phone || null,
-    // se o backend ainda não espera senha em /customers,
-    // remova esse campo ou adapte para a rota de auth/registro
     password: customerForm.value.password
   });
 
@@ -200,7 +268,7 @@ async function createCustomer() {
 }
 
 function startEdit(c: Customer) {
-  editCustomer.value = { ...c }; // cópia, pra não mexer direto no array
+  editCustomer.value = { ...c };
   editDialog.value = true;
 }
 

@@ -37,9 +37,9 @@ type Reservation = {
   space_id: string;
   branch_id: string;
   customer_id: string;
-  date: string;        // YYYY-MM-DD
-  start_time: string;  // HH:MM:SS
-  end_time: string;    // HH:MM:SS
+  date: string;
+  start_time: string;
+  end_time: string;
   status: "PENDING" | "CONFIRMED" | "CANCELLED";
   total_amount: number;
   deposit_pct: number;
@@ -60,6 +60,7 @@ const loadingReservations = ref(false);
 const savingReservation = ref(false);
 const loadingSpaces = ref(false);
 
+/** Campos do formulário */
 const formBranchId = ref<string | null>(null);
 const formSpaceId = ref<string | null>(null);
 const formCustomerId = ref<string | null>(null);
@@ -70,7 +71,24 @@ const formTotalAmount = ref<number | null>(null);
 const formDepositPct = ref<number | null>(null);
 const formNotes = ref("");
 
+/** Filtro da tabela */
 const filterDate = ref("");
+
+/**
+ * Validações
+ */
+const rules = {
+  required: (v: any) => !!v || "Campo obrigatório",
+  positive: (v: number) =>
+    v >= 0 || "O valor deve ser maior ou igual a zero",
+  percent: (v: number) =>
+    (v >= 0 && v <= 100) || "Use um valor entre 0 e 100",
+  timeOrder: () =>
+    !formStartTime.value ||
+    !formEndTime.value ||
+    formEndTime.value > formStartTime.value ||
+    "Horário final deve ser maior que o inicial",
+};
 
 /**
  * Helpers
@@ -97,13 +115,9 @@ function formatMoney(value?: number | null): string {
 
 function statusColor(status: Reservation["status"]): string {
   switch (status) {
-    case "CONFIRMED":
-      return "success";
-    case "CANCELLED":
-      return "error";
-    case "PENDING":
-    default:
-      return "warning";
+    case "CONFIRMED": return "success";
+    case "CANCELLED": return "error";
+    default: return "warning";
   }
 }
 
@@ -123,10 +137,9 @@ function customerName(customerId: string): string {
 async function loadBranches() {
   try {
     const res = await fetch(`${API_BASE}/branches`);
-    if (!res.ok) throw new Error("failed to load branches");
+    if (!res.ok) throw new Error();
     branches.value = await res.json();
-  } catch (err) {
-    console.error("loadBranches failed:", err);
+  } catch {
     branches.value = [];
   }
 }
@@ -134,10 +147,9 @@ async function loadBranches() {
 async function loadCustomers() {
   try {
     const res = await fetch(`${API_BASE}/customers`);
-    if (!res.ok) throw new Error("failed to load customers");
+    if (!res.ok) throw new Error();
     customers.value = await res.json();
-  } catch (err) {
-    console.error("loadCustomers failed:", err);
+  } catch {
     customers.value = [];
   }
 }
@@ -145,13 +157,10 @@ async function loadCustomers() {
 async function loadSpacesForBranch(branchId: string) {
   loadingSpaces.value = true;
   try {
-    const res = await fetch(
-      `${API_BASE}/branches/${branchId}/spaces?only_active=true`
-    );
-    if (!res.ok) throw new Error("failed to load spaces");
+    const res = await fetch(`${API_BASE}/branches/${branchId}/spaces?only_active=true`);
+    if (!res.ok) throw new Error();
     spaces.value = await res.json();
-  } catch (err) {
-    console.error("loadSpacesForBranch failed:", err);
+  } catch {
     spaces.value = [];
   } finally {
     loadingSpaces.value = false;
@@ -170,14 +179,11 @@ async function loadReservations() {
     if (filterDate.value) params.set("date", filterDate.value);
 
     const res = await fetch(
-      `${API_BASE}/spaces/${formSpaceId.value}/reservations${
-        params.toString() ? `?${params.toString()}` : ""
-      }`
+      `${API_BASE}/spaces/${formSpaceId.value}/reservations${params.toString() ? `?${params}` : ""}`
     );
-    if (!res.ok) throw new Error("failed to load reservations");
+    if (!res.ok) throw new Error();
     reservations.value = await res.json();
-  } catch (err) {
-    console.error("loadReservations failed:", err);
+  } catch {
     reservations.value = [];
   } finally {
     loadingReservations.value = false;
@@ -185,12 +191,15 @@ async function loadReservations() {
 }
 
 /**
- * Criação de reserva
+ * Criar reserva
  */
 async function createReservation() {
   if (!formBranchId.value || !formSpaceId.value || !formCustomerId.value) return;
-  if (!formDate.value || !formStartTime.value || !formEndTime.value) return;
-  if (formTotalAmount.value == null || isNaN(formTotalAmount.value)) return;
+
+  if (formEndTime.value <= formStartTime.value) {
+    alert("Horário final deve ser maior que o horário inicial.");
+    return;
+  }
 
   savingReservation.value = true;
   try {
@@ -200,8 +209,7 @@ async function createReservation() {
       start_time: formStartTime.value,
       end_time: formEndTime.value,
       total_amount: formTotalAmount.value,
-      deposit_pct:
-        formDepositPct.value != null ? formDepositPct.value : undefined,
+      deposit_pct: formDepositPct.value ?? undefined,
       notes: formNotes.value.trim() || undefined,
     };
 
@@ -214,7 +222,7 @@ async function createReservation() {
       }
     );
 
-    if (!res.ok) throw new Error("failed to create reservation");
+    if (!res.ok) throw new Error();
 
     await loadReservations();
 
@@ -225,7 +233,7 @@ async function createReservation() {
     formDepositPct.value = null;
     formNotes.value = "";
   } catch (err) {
-    console.error("createReservation failed:", err);
+    console.error(err);
   } finally {
     savingReservation.value = false;
   }
@@ -234,14 +242,11 @@ async function createReservation() {
 /**
  * Reações
  */
-watch(formBranchId, async (newBranchId) => {
+watch(formBranchId, async (newVal) => {
   spaces.value = [];
   formSpaceId.value = null;
   reservations.value = [];
-
-  if (newBranchId) {
-    await loadSpacesForBranch(newBranchId);
-  }
+  if (newVal) await loadSpacesForBranch(newVal);
 });
 
 watch(formSpaceId, async () => {
@@ -249,9 +254,7 @@ watch(formSpaceId, async () => {
   await loadReservations();
 });
 
-watch(filterDate, async () => {
-  await loadReservations();
-});
+watch(filterDate, loadReservations);
 
 /**
  * Init
@@ -267,12 +270,9 @@ onMounted(async () => {
       <v-col cols="12">
         <div class="d-flex align-center justify-space-between mb-6">
           <div>
-            <h1 class="text-h4 font-weight-medium mb-1">
-              Reservas
-            </h1>
+            <h1 class="text-h4 font-weight-medium mb-1">Reservas</h1>
             <p class="text-body-2 text-medium-emphasis mb-0">
-              Cadastre novas reservas vinculadas a clientes e visualize as
-              reservas de cada espaço.
+              Cadastre novas reservas e visualize as existentes.
             </p>
           </div>
         </div>
@@ -286,84 +286,82 @@ onMounted(async () => {
           <v-card-title class="text-subtitle-1 font-weight-medium">
             Nova reserva
           </v-card-title>
+
           <v-card-text>
             <v-form @submit.prevent="createReservation">
+
+              <!-- FILIAL -->
               <v-select
                 v-model="formBranchId"
                 :items="branches"
                 item-title="name"
                 item-value="id"
                 label="Filial"
-                variant="outlined"
+                placeholder="Selecione a filial"
+                :rules="[rules.required]"
                 density="comfortable"
-                class="mb-3"
-                hide-details="auto"
                 clearable
-                required
+                class="mb-3"
               />
 
+              <!-- ESPAÇO -->
               <v-select
                 v-model="formSpaceId"
                 :items="spacesForSelectedBranch"
-                :loading="loadingSpaces"
                 item-title="name"
                 item-value="id"
+                :loading="loadingSpaces"
                 label="Espaço"
-                variant="outlined"
-                density="comfortable"
-                class="mb-3"
-                hide-details="auto"
-                clearable
+                placeholder="Escolha um espaço"
                 :disabled="!formBranchId"
-                required
+                :rules="[rules.required]"
+                density="comfortable"
+                clearable
+                class="mb-3"
               />
 
+              <!-- CLIENTE -->
               <v-select
                 v-model="formCustomerId"
                 :items="customers"
                 item-title="name"
                 item-value="id"
                 label="Cliente"
-                variant="outlined"
+                placeholder="Selecione o cliente"
                 density="comfortable"
-                class="mb-3"
-                hide-details="auto"
+                :rules="[rules.required]"
                 clearable
-                required
+                class="mb-3"
               />
 
               <v-row>
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="formDate"
-                    label="Data"
                     type="date"
-                    variant="outlined"
+                    label="Data"
+                    :rules="[rules.required]"
                     density="comfortable"
-                    hide-details="auto"
-                    required
                   />
                 </v-col>
+
                 <v-col cols="12" sm="3">
                   <v-text-field
                     v-model="formStartTime"
-                    label="Início"
                     type="time"
-                    variant="outlined"
+                    label="Início"
+                    :rules="[rules.required]"
                     density="comfortable"
-                    hide-details="auto"
-                    required
                   />
                 </v-col>
+
                 <v-col cols="12" sm="3">
                   <v-text-field
                     v-model="formEndTime"
-                    label="Fim"
                     type="time"
-                    variant="outlined"
+                    label="Fim"
+                    :rules="[rules.required, rules.timeOrder]"
                     density="comfortable"
-                    hide-details="auto"
-                    required
                   />
                 </v-col>
               </v-row>
@@ -377,24 +375,22 @@ onMounted(async () => {
                     min="0"
                     step="0.01"
                     prefix="R$"
-                    variant="outlined"
+                    :rules="[rules.required, rules.positive]"
                     density="comfortable"
-                    hide-details="auto"
-                    required
                   />
                 </v-col>
+
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model.number="formDepositPct"
-                    label="% sinal (opcional)"
+                    label="% de sinal"
                     type="number"
                     min="0"
                     max="100"
                     step="1"
                     suffix="%"
-                    variant="outlined"
+                    :rules="[rules.percent]"
                     density="comfortable"
-                    hide-details="auto"
                   />
                 </v-col>
               </v-row>
@@ -402,48 +398,45 @@ onMounted(async () => {
               <v-textarea
                 v-model="formNotes"
                 label="Observações"
-                variant="outlined"
-                density="comfortable"
                 rows="2"
+                density="comfortable"
                 auto-grow
-                hide-details="auto"
                 class="mb-2"
               />
 
               <v-btn
                 type="submit"
-                color="primary"
                 block
-                class="mt-2 text-none"
+                color="primary"
                 :loading="savingReservation"
                 :disabled="!formSpaceId || !formCustomerId"
               >
                 Reservar
               </v-btn>
+
             </v-form>
           </v-card-text>
         </v-card>
       </v-col>
 
-      <!-- LISTA DE RESERVAS -->
+      <!-- LISTA -->
       <v-col cols="12" md="7">
         <v-card elevation="2">
           <v-card-title class="d-flex align-center justify-space-between">
             <div class="text-subtitle-1 font-weight-medium">
               Reservas do espaço selecionado
             </div>
-            <div class="d-flex ga-2">
-              <v-text-field
-                v-model="filterDate"
-                type="date"
-                label="Data"
-                density="compact"
-                variant="outlined"
-                hide-details
-                style="max-width: 160px"
-                :disabled="!formSpaceId"
-              />
-            </div>
+
+            <v-text-field
+              v-model="filterDate"
+              type="date"
+              label="Filtrar por data"
+              density="compact"
+              variant="outlined"
+              hide-details
+              style="max-width: 160px"
+              :disabled="!formSpaceId"
+            />
           </v-card-title>
 
           <v-divider />
@@ -452,8 +445,8 @@ onMounted(async () => {
             <v-data-table
               :items="reservations"
               :loading="loadingReservations"
-              item-key="id"
               density="compact"
+              item-key="id"
               :headers="[
                 { title: 'Data', key: 'date' },
                 { title: 'Início', key: 'start_time' },
@@ -463,6 +456,7 @@ onMounted(async () => {
                 { title: 'Status', key: 'status' },
               ]"
             >
+
               <template #item.date="{ value }">
                 {{ formatDate(value) }}
               </template>
@@ -500,10 +494,11 @@ onMounted(async () => {
                     Selecione um espaço para visualizar as reservas.
                   </div>
                   <div v-else>
-                    Nenhuma reserva encontrada para o filtro atual.
+                    Nenhuma reserva encontrada.
                   </div>
                 </div>
               </template>
+
             </v-data-table>
           </v-card-text>
         </v-card>
