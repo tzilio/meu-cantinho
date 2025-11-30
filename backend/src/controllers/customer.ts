@@ -1,12 +1,12 @@
-// src/controllers/user.ts
+// src/controllers/customer.ts
 import { Request, Response } from 'express';
-import { pool } from 'db';
+import { pool } from '../db';
 import { v4 as uuid } from 'uuid';
 
 type SqlParam = string | number | boolean | null;
 
 function sendInternalError(res: Response, err: unknown, context: string) {
-  console.error(`[users:${context}]`, err);
+  console.error(`[customers:${context}]`, err);
   return res.status(500).json({ error: 'internal_error', context });
 }
 
@@ -14,7 +14,7 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  * @openapi
  * components:
  *   schemas:
- *     User:
+ *     Customer:
  *       type: object
  *       properties:
  *         id:
@@ -28,14 +28,6 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *         phone:
  *           type: string
  *           nullable: true
- *         role:
- *           type: string
- *           enum: [CUSTOMER, ADMIN, MANAGER]
- *           example: CUSTOMER
- *         last_login_at:
- *           type: string
- *           format: date-time
- *           nullable: true
  *         created_at:
  *           type: string
  *           format: date-time
@@ -46,17 +38,17 @@ function sendInternalError(res: Response, err: unknown, context: string) {
 
 /**
  * @openapi
- * /users:
+ * /customers:
  *   post:
- *     summary: Cria um novo usuário
- *     tags: [Users]
+ *     summary: Cria um novo cliente
+ *     tags: [Customers]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, email, password]
+ *             required: [name, email]
  *             properties:
  *               name:
  *                 type: string
@@ -68,39 +60,28 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *               phone:
  *                 type: string
  *                 example: '+55 41 99999-0000'
- *               role:
- *                 type: string
- *                 enum: [CUSTOMER, ADMIN, MANAGER]
- *                 example: CUSTOMER
- *               password:
- *                 type: string
- *                 format: password
  *     responses:
  *       201:
- *         description: Usuário criado
+ *         description: Cliente criado
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/Customer'
  *       400:
  *         description: Dados inválidos
  *       409:
  *         description: E-mail já cadastrado
  */
-export const createUser = async (req: Request, res: Response) => {
+export const createCustomer = async (req: Request, res: Response) => {
   try {
     const {
       name,
       email,
       phone,
-      role,
-      password,
     } = req.body as {
       name?: string;
       email?: string;
       phone?: string | null;
-      role?: string;
-      password?: string;
     };
 
     if (!name || typeof name !== 'string') {
@@ -109,66 +90,47 @@ export const createUser = async (req: Request, res: Response) => {
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'invalid_email' });
     }
-    if (!password || typeof password !== 'string') {
-      return res.status(400).json({ error: 'invalid_password' });
-    }
-
-    const normalizedRole = role ?? 'CUSTOMER';
-    if (!['CUSTOMER', 'ADMIN', 'MANAGER'].includes(normalizedRole)) {
-      return res.status(400).json({ error: 'invalid_role' });
-    }
 
     // Confere se o e-mail já existe
     const emailCheck = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
+      'SELECT id FROM customers WHERE email = $1',
       [email],
     );
     if (emailCheck.rowCount > 0) {
       return res.status(409).json({ error: 'email_already_in_use' });
     }
 
-    const userId = uuid();
+    const customerId = uuid();
 
-    // Aqui você poderia aplicar hash de senha (bcrypt, etc.).
-    // Por simplicidade, estamos gravando diretamente em password_hash.
     const sql = `
-      INSERT INTO users
-        (id, name, email, phone, role, password_hash)
+      INSERT INTO customers
+        (id, name, email, phone)
       VALUES
-        ($1, $2, $3, $4, $5, $6)
-      RETURNING id, name, email, phone, role, last_login_at, created_at, updated_at;
+        ($1, $2, $3, $4)
+      RETURNING id, name, email, phone, created_at, updated_at;
     `;
 
     const params: SqlParam[] = [
-      userId,
+      customerId,
       name,
-      phone ?? null,
       email,
-      normalizedRole,
-      password, // TODO: aplicar hash real em produção
+      phone ?? null,
     ];
 
     const { rows } = await pool.query(sql, params);
     return res.status(201).json(rows[0]);
   } catch (err) {
-    return sendInternalError(res, err, 'createUser');
+    return sendInternalError(res, err, 'createCustomer');
   }
 };
 
 /**
  * @openapi
- * /users:
+ * /customers:
  *   get:
- *     summary: Lista usuários
- *     tags: [Users]
+ *     summary: Lista clientes
+ *     tags: [Customers]
  *     parameters:
- *       - in: query
- *         name: role
- *         required: false
- *         schema:
- *           type: string
- *           enum: [CUSTOMER, ADMIN, MANAGER]
- *         description: Filtra por papel do usuário.
  *       - in: query
  *         name: search
  *         required: false
@@ -177,28 +139,22 @@ export const createUser = async (req: Request, res: Response) => {
  *         description: Busca parcial por nome ou e-mail.
  *     responses:
  *       200:
- *         description: Lista de usuários
+ *         description: Lista de clientes
  *         content:
  *           application/json:
  *             schema:
  *               type: array
  *               items:
- *                 $ref: '#/components/schemas/User'
+ *                 $ref: '#/components/schemas/Customer'
  */
-export const listUsers = async (req: Request, res: Response) => {
+export const listCustomers = async (req: Request, res: Response) => {
   try {
-    const { role, search } = req.query as {
-      role?: string;
+    const { search } = req.query as {
       search?: string;
     };
 
     const params: SqlParam[] = [];
     const conditions: string[] = [];
-
-    if (role) {
-      conditions.push('role = $' + (params.length + 1));
-      params.push(role);
-    }
 
     if (search) {
       conditions.push(
@@ -211,7 +167,8 @@ export const listUsers = async (req: Request, res: Response) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    let sql = 'SELECT id, name, email, phone, role, last_login_at, created_at, updated_at FROM users';
+    let sql =
+      'SELECT id, name, email, phone, created_at, updated_at FROM customers';
     if (conditions.length > 0) {
       sql += ' WHERE ' + conditions.join(' AND ');
     }
@@ -220,60 +177,60 @@ export const listUsers = async (req: Request, res: Response) => {
     const { rows } = await pool.query(sql, params);
     return res.json(rows);
   } catch (err) {
-    return sendInternalError(res, err, 'listUsers');
+    return sendInternalError(res, err, 'listCustomers');
   }
 };
 
 /**
  * @openapi
- * /users/{userId}:
+ * /customers/{customerId}:
  *   get:
- *     summary: Detalhes de um usuário
- *     tags: [Users]
+ *     summary: Detalhes de um cliente
+ *     tags: [Customers]
  *     parameters:
  *       - in: path
- *         name: userId
+ *         name: customerId
  *         required: true
  *         schema:
  *           type: string
  *           format: uuid
  *     responses:
  *       200:
- *         description: Usuário encontrado
+ *         description: Cliente encontrado
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/Customer'
  *       404:
- *         description: Usuário não encontrado
+ *         description: Cliente não encontrado
  */
-export const fetchUser = async (req: Request, res: Response) => {
+export const fetchCustomer = async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { customerId } = req.params;
     const { rows } = await pool.query(
-      'SELECT id, name, email, phone, role, last_login_at, created_at, updated_at FROM users WHERE id = $1',
-      [userId],
+      'SELECT id, name, email, phone, created_at, updated_at FROM customers WHERE id = $1',
+      [customerId],
     );
 
     if (!rows[0]) {
-      return res.status(404).json({ error: 'user_not_found' });
+      return res.status(404).json({ error: 'customer_not_found' });
     }
 
     return res.json(rows[0]);
   } catch (err) {
-    return sendInternalError(res, err, 'fetchUser');
+    return sendInternalError(res, err, 'fetchCustomer');
   }
 };
 
 /**
  * @openapi
- * /users/{userId}:
+ * /customers/{customerId}:
  *   patch:
- *     summary: Atualiza dados de um usuário
- *     tags: [Users]
+ *     summary: Atualiza dados de um cliente
+ *     tags: [Customers]
  *     parameters:
  *       - in: path
- *         name: userId
+ *         name: customerId
  *         required: true
  *         schema:
  *           type: string
@@ -287,43 +244,61 @@ export const fetchUser = async (req: Request, res: Response) => {
  *             properties:
  *               name:
  *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
  *               phone:
  *                 type: string
  *                 nullable: true
- *               role:
- *                 type: string
- *                 enum: [CUSTOMER, ADMIN, MANAGER]
  *     responses:
  *       200:
- *         description: Usuário atualizado
+ *         description: Cliente atualizado
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/Customer'
  *       400:
- *         description: Nenhum campo válido enviado
+ *         description: Nenhum campo válido enviado ou dados inválidos
  *       404:
- *         description: Usuário não encontrado
+ *         description: Cliente não encontrado
+ *       409:
+ *         description: E-mail já cadastrado em outro cliente
  */
-export const updateUser = async (req: Request, res: Response) => {
+export const updateCustomer = async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { customerId } = req.params;
     const {
       name,
       phone,
-      role,
+      email,
     } = req.body as {
       name?: string;
       phone?: string | null;
-      role?: string;
+      email?: string;
     };
 
+    // Confere se o cliente existe
     const lookup = await pool.query(
-      'SELECT id FROM users WHERE id = $1',
-      [userId],
+      'SELECT id FROM customers WHERE id = $1',
+      [customerId],
     );
     if (!lookup.rows[0]) {
-      return res.status(404).json({ error: 'user_not_found' });
+      return res.status(404).json({ error: 'customer_not_found' });
+    }
+
+    // Se veio email, valida e checa unicidade (exceto o próprio customerId)
+    if (email !== undefined) {
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: 'invalid_email' });
+      }
+
+      const emailCheck = await pool.query(
+        'SELECT id FROM customers WHERE email = $1 AND id <> $2',
+        [email, customerId],
+      );
+      if (emailCheck.rowCount > 0) {
+        return res.status(409).json({ error: 'email_already_in_use' });
+      }
     }
 
     const fields: string[] = [];
@@ -340,12 +315,9 @@ export const updateUser = async (req: Request, res: Response) => {
       params.push(phone);
     }
 
-    if (role !== undefined) {
-      if (!['CUSTOMER', 'ADMIN', 'MANAGER'].includes(role)) {
-        return res.status(400).json({ error: 'invalid_role' });
-      }
-      fields.push(`role = $${paramIndex++}`);
-      params.push(role);
+    if (email !== undefined) {
+      fields.push(`email = $${paramIndex++}`);
+      params.push(email);
     }
 
     if (fields.length === 0) {
@@ -355,59 +327,60 @@ export const updateUser = async (req: Request, res: Response) => {
     fields.push('updated_at = NOW()');
 
     const sql = `
-      UPDATE users
+      UPDATE customers
       SET ${fields.join(', ')}
       WHERE id = $${paramIndex}
-      RETURNING id, name, email, phone, role, last_login_at, created_at, updated_at;
+      RETURNING id, name, email, phone, created_at, updated_at;
     `;
-    params.push(userId);
+    params.push(customerId);
 
     const { rows } = await pool.query(sql, params);
     return res.json(rows[0]);
   } catch (err) {
-    return sendInternalError(res, err, 'updateUser');
+    return sendInternalError(res, err, 'updateCustomer');
   }
 };
 
+
 /**
  * @openapi
- * /users/{userId}:
+ * /customers/{customerId}:
  *   delete:
- *     summary: Remove um usuário
+ *     summary: Remove um cliente
  *     description: Pode ser bloqueado via regra de negócio se houver reservas associadas.
- *     tags: [Users]
+ *     tags: [Customers]
  *     parameters:
  *       - in: path
- *         name: userId
+ *         name: customerId
  *         required: true
  *         schema:
  *           type: string
  *           format: uuid
  *     responses:
  *       204:
- *         description: Usuário removido
+ *         description: Cliente removido
  *       404:
- *         description: Usuário não encontrado
+ *         description: Cliente não encontrado
  */
-export const removeUser = async (req: Request, res: Response) => {
+export const removeCustomer = async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { customerId } = req.params;
 
     // Se quiser impedir remoção com reservas, dá pra checar aqui:
     // SELECT 1 FROM reservations WHERE customer_id = $1 LIMIT 1;
 
     const result = await pool.query(
-      'DELETE FROM users WHERE id = $1',
-      [userId],
+      'DELETE FROM customers WHERE id = $1',
+      [customerId],
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'user_not_found' });
+      return res.status(404).json({ error: 'customer_not_found' });
     }
 
     return res.status(204).send();
   } catch (err) {
-    return sendInternalError(res, err, 'removeUser');
+    return sendInternalError(res, err, 'removeCustomer');
   }
 };
 

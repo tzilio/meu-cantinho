@@ -1,12 +1,25 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon --watch src --ext ts,js --exec ts-node ./src/server.ts",
+    "build": "tsc",
+    "start": "node dist/services/server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "dependencies": {
+    "express": "^4.19.0",
+    "cors": "^2.8.5",
+    "pg": "^8.11.0",
+    "dotenv": "^16.3.0",
+    "uuid": "^9.0.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^4.6.3",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.2",
+    "nodemon": "^3.1.0",
+    "@types/multer": "^1.4.11"
+  }
 }

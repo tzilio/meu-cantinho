@@ -1,6 +1,6 @@
 // src/controllers/space.ts
 import { Request, Response } from 'express';
-import { pool } from 'db';
+import { pool } from '../db';
 import { v4 as uuid } from 'uuid';
 
 type SqlParam = string | number | boolean | null;
@@ -35,6 +35,10 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *           format: float
  *         active:
  *           type: boolean
+ *         cover_url:
+ *           type: string
+ *           nullable: true
+ *           description: URL pública da foto de capa do espaço
  *         created_at:
  *           type: string
  *           format: date-time
@@ -79,6 +83,10 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *               active:
  *                 type: boolean
  *                 example: true
+ *               cover_url:
+ *                 type: string
+ *                 nullable: true
+ *                 description: URL pública da foto de capa do espaço
  *     responses:
  *       201:
  *         description: Espaço criado
@@ -100,12 +108,14 @@ export const createSpace = async (req: Request, res: Response) => {
       capacity,
       price_per_hour,
       active,
+      cover_url,
     } = req.body as {
       name?: string;
       description?: string | null;
       capacity?: number;
       price_per_hour?: number;
       active?: boolean;
+      cover_url?: string | null;
     };
 
     if (!name || typeof name !== 'string') {
@@ -130,9 +140,9 @@ export const createSpace = async (req: Request, res: Response) => {
     const spaceId = uuid();
     const sql = `
       INSERT INTO spaces
-        (id, branch_id, name, description, capacity, price_per_hour, active)
+        (id, branch_id, name, description, capacity, price_per_hour, active, cover_url)
       VALUES
-        ($1, $2, $3, $4, $5, $6, COALESCE($7, TRUE))
+        ($1, $2, $3, $4, $5, $6, COALESCE($7, TRUE), $8)
       RETURNING *;
     `;
 
@@ -144,6 +154,7 @@ export const createSpace = async (req: Request, res: Response) => {
       Number(capacity),
       Number(price_per_hour),
       active ?? true,
+      cover_url ?? null,
     ];
 
     const { rows } = await pool.query(sql, params);
@@ -288,6 +299,9 @@ export const fetchSpace = async (req: Request, res: Response) => {
  *                 format: float
  *               active:
  *                 type: boolean
+ *               cover_url:
+ *                 type: string
+ *                 nullable: true
  *     responses:
  *       200:
  *         description: Espaço atualizado
@@ -309,12 +323,14 @@ export const updateSpace = async (req: Request, res: Response) => {
       capacity,
       price_per_hour,
       active,
+      cover_url,
     } = req.body as {
       name?: string;
       description?: string | null;
       capacity?: number;
       price_per_hour?: number;
       active?: boolean;
+      cover_url?: string | null;
     };
 
     const lookup = await pool.query(
@@ -355,6 +371,10 @@ export const updateSpace = async (req: Request, res: Response) => {
       fields.push(`active = $${paramIndex++}`);
       params.push(active);
     }
+    if (cover_url !== undefined) {
+      fields.push(`cover_url = $${paramIndex++}`);
+      params.push(cover_url);
+    }
 
     if (fields.length === 0) {
       return res.status(400).json({ error: 'no_valid_fields' });
@@ -376,5 +396,26 @@ export const updateSpace = async (req: Request, res: Response) => {
     return sendInternalError(res, err, 'updateSpace');
   }
 };
+
+export const deleteSpace = async (req: Request, res: Response) => {
+  try {
+    const { spaceId } = req.params;
+
+    const result = await pool.query(
+      "DELETE FROM spaces WHERE id = $1",
+      [spaceId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "space_not_found" });
+    }
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error("deleteSpace:", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+};
+
 
 export {};

@@ -1,44 +1,57 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
+import { useBranchesStore, type Branch } from "@/stores/branchesStore";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = "http://localhost:3000";
 
-type Branch = {
-  id: string;
-  name: string;
-  address: string | null;
-  created_at?: string | null;
-};
-
+/**
+ * Space conforme o novo schema de spaces:
+ * id, branch_id, name, description, capacity, price_per_hour, active, cover_url...
+ */
 type Space = {
   id: string;
+  branch_id: string;
   name: string;
   description?: string | null;
-  capacity?: number | null;
-  daily_price?: number | null;
-  image_url?: string | null;
+  capacity: number;
+  price_per_hour: number;
+  active?: boolean;
+  cover_url?: string | null;
 };
 
 type SpaceForm = {
   name: string;
   description: string;
   capacity: number | null;
-  daily_price: number | null;
+  price_per_hour: number | null;
+  /**
+   * Aqui passaremos a URL final da imagem,
+   * que será enviada como cover_url pro backend.
+   */
   image_url: string;
 };
 
 const defaultSpaceImage =
   "https://images.pexels.com/photos/260922/pexels-photo-260922.jpeg?auto=compress&cs=tinysrgb&w=800";
 
-const branches = ref<Branch[]>([]);
-const loadingBranches = ref(false);
+// --- STORE GLOBAL DE FILIAIS ---
+const {
+  branches,
+  loadingBranches,
+  loadBranches,
+  addBranchLocally,
+  removeBranchLocally,
+} = useBranchesStore();
+
+// --- estado local do componente ---
 const savingBranch = ref(false);
 
 const searchText = ref("");
 
 const branchForm = ref({
   name: "",
+  state: "",
+  city: "",
   address: "",
 });
 
@@ -55,12 +68,17 @@ const spaceForm = ref<SpaceForm>({
   name: "",
   description: "",
   capacity: null,
-  daily_price: null,
+  price_per_hour: null,
   image_url: "",
 });
 
+const uploadingSpaceImage = ref(false);
+// key pra resetar o v-file-input (limpar arquivo selecionado)
+const fileInputKey = ref(0);
+
 const branchHeaders = [
   { title: "Nome", key: "name" },
+  { title: "Cidade / UF", key: "cityState", sortable: false },
   { title: "Endereço", key: "address", sortable: false },
   { title: "Criada em", key: "created_at" },
   { title: "Ações", key: "actions", sortable: false },
@@ -71,8 +89,15 @@ const filteredBranches = computed(() => {
   if (!q) return branches.value;
   return branches.value.filter((b) => {
     const name = b.name?.toLowerCase() ?? "";
+    const city = b.city?.toLowerCase() ?? "";
+    const state = b.state?.toLowerCase() ?? "";
     const addr = b.address?.toLowerCase() ?? "";
-    return name.includes(q) || addr.includes(q);
+    return (
+      name.includes(q) ||
+      city.includes(q) ||
+      state.includes(q) ||
+      addr.includes(q)
+    );
   });
 });
 
@@ -95,39 +120,53 @@ function formatMoney(value?: number | null): string {
   });
 }
 
-async function loadBranches() {
-  loadingBranches.value = true;
-  try {
-    const res = await fetch(`${API_BASE}/branches`);
-    if (!res.ok) throw new Error("failed to load branches");
-    branches.value = await res.json();
-  } catch (err) {
-    console.error("loadBranches failed:", err);
-    branches.value = [];
-  } finally {
-    loadingBranches.value = false;
-  }
-}
-
 async function createBranch() {
-  if (!branchForm.value.name.trim() || !branchForm.value.address.trim()) {
+  if (
+    !branchForm.value.name.trim() ||
+    !branchForm.value.city.trim() ||
+    !branchForm.value.state.trim() ||
+    !branchForm.value.address.trim()
+  ) {
     return;
   }
+
   savingBranch.value = true;
+
   try {
+    const payload = {
+      name: branchForm.value.name.trim(),
+      city: branchForm.value.city.trim(),
+      state: branchForm.value.state.trim(),
+      address: branchForm.value.address.trim(),
+    };
+
     const res = await fetch(`${API_BASE}/branches`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: branchForm.value.name.trim(),
-        address: branchForm.value.address.trim(),
-      }),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("failed to create branch");
-    const created: Branch = await res.json();
-    branches.value = [created, ...branches.value];
-    branchForm.value.name = "";
-    branchForm.value.address = "";
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(
+        "createBranch failed:",
+        res.status,
+        res.statusText,
+        text
+      );
+      throw new Error("failed to create branch");
+    }
+
+    // backend retorna a filial criada
+    const created = (await res.json()) as Branch;
+    addBranchLocally(created);
+
+    branchForm.value = {
+      name: "",
+      city: "",
+      state: "",
+      address: "",
+    };
   } catch (err) {
     console.error("createBranch failed:", err);
   } finally {
@@ -136,9 +175,26 @@ async function createBranch() {
 }
 
 async function deleteBranch(id: string) {
+  const ok = window.confirm(
+    "Tem certeza que deseja excluir esta filial? Essa ação não pode ser desfeita."
+  );
+  if (!ok) return;
+
   try {
-    await fetch(`${API_BASE}/branches/${id}`, { method: "DELETE" });
-    branches.value = branches.value.filter((b) => b.id !== id);
+    const res = await fetch(`${API_BASE}/branches/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(
+        "deleteBranch failed:",
+        res.status,
+        res.statusText,
+        text
+      );
+      throw new Error("failed to delete branch");
+    }
+
+    removeBranchLocally(id);
+
     if (selectedBranchId.value === id) {
       selectedBranchId.value = null;
       spaces.value = [];
@@ -148,15 +204,15 @@ async function deleteBranch(id: string) {
   }
 }
 
-function resetSpaceForm(branchForEdit?: Space | null) {
-  if (branchForEdit) {
-    editingSpaceId.value = branchForEdit.id;
+function resetSpaceForm(spaceForEdit?: Space | null) {
+  if (spaceForEdit) {
+    editingSpaceId.value = spaceForEdit.id;
     spaceForm.value = {
-      name: branchForEdit.name ?? "",
-      description: branchForEdit.description ?? "",
-      capacity: branchForEdit.capacity ?? null,
-      daily_price: branchForEdit.daily_price ?? null,
-      image_url: branchForEdit.image_url ?? "",
+      name: spaceForEdit.name ?? "",
+      description: spaceForEdit.description ?? "",
+      capacity: spaceForEdit.capacity ?? null,
+      price_per_hour: spaceForEdit.price_per_hour ?? null,
+      image_url: spaceForEdit.cover_url ?? "",
     };
   } else {
     editingSpaceId.value = null;
@@ -164,10 +220,12 @@ function resetSpaceForm(branchForEdit?: Space | null) {
       name: "",
       description: "",
       capacity: null,
-      daily_price: null,
+      price_per_hour: null,
       image_url: "",
     };
   }
+  // sempre que abre o diálogo, resetamos o file input
+  fileInputKey.value++;
 }
 
 function openSpaceDialog() {
@@ -188,10 +246,11 @@ async function loadSpaces() {
   loadingSpaces.value = true;
   try {
     const res = await fetch(
-      `${API_BASE}/branches/${selectedBranchId.value}/spaces`
+      `${API_BASE}/branches/${selectedBranchId.value}/spaces?only_active=false`
     );
     if (!res.ok) throw new Error("failed to load spaces");
-    spaces.value = await res.json();
+    const data: Space[] = await res.json();
+    spaces.value = data;
   } catch (err) {
     console.error("loadSpaces failed:", err);
     spaces.value = [];
@@ -200,26 +259,94 @@ async function loadSpaces() {
   }
 }
 
+/**
+ * Upload da foto de capa:
+ * - recebe File ou File[]
+ * - envia para POST /space-cover (multipart/form-data)
+ * - backend retorna { url: "/uploads/space-covers/arquivo.jpg" }
+ * - salvamos a URL completa em spaceForm.image_url
+ */
+async function handleSpaceImageSelected(files: File[] | File | null) {
+  const file = Array.isArray(files) ? files[0] : files;
+  if (!file) return;
+
+  uploadingSpaceImage.value = true;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/space-cover`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(
+        "handleSpaceImageSelected failed:",
+        res.status,
+        res.statusText,
+        text
+      );
+      throw new Error("upload_failed");
+    }
+
+    const data = (await res.json()) as { url: string };
+
+    // salva URL completa (pra preview e pra mandar pro back)
+    spaceForm.value.image_url = `${API_BASE}${data.url}`;
+    console.log("Imagem subida, URL final:", spaceForm.value.image_url);
+  } catch (err) {
+    console.error("handleSpaceImageSelected failed:", err);
+  } finally {
+    uploadingSpaceImage.value = false;
+  }
+}
+
+// limpar imagem já selecionada / enviada
+function clearSpaceImage() {
+  spaceForm.value.image_url = "";
+  fileInputKey.value++; // força recriar o v-file-input
+}
+
 async function saveSpace() {
   if (!selectedBranchId.value) return;
   if (!spaceForm.value.name.trim()) return;
+
+  if (
+    spaceForm.value.capacity == null ||
+    spaceForm.value.capacity <= 0
+  ) {
+    console.warn("Capacidade inválida");
+    return;
+  }
+  if (
+    spaceForm.value.price_per_hour == null ||
+    spaceForm.value.price_per_hour < 0
+  ) {
+    console.warn("Preço por hora inválido");
+    return;
+  }
 
   savingSpace.value = true;
   try {
     const payload = {
       name: spaceForm.value.name.trim(),
-      description: spaceForm.value.description.trim(),
+      description: spaceForm.value.description.trim() || null,
       capacity: spaceForm.value.capacity,
-      daily_price: spaceForm.value.daily_price,
-      image_url: spaceForm.value.image_url.trim() || null,
-      branch_id: selectedBranchId.value,
+      price_per_hour: spaceForm.value.price_per_hour,
+      active: true,
+      // enviamos a URL da imagem como cover_url para o back
+      cover_url: spaceForm.value.image_url || null,
     };
 
     const isEditing = !!editingSpaceId.value;
+
     const url = isEditing
-      ? `${API_BASE}/spaces/${editingSpaceId.value}`
-      : `${API_BASE}/spaces`;
-    const method = isEditing ? "PUT" : "POST";
+      ? `${API_BASE}/spaces/${editingSpaceId.value}` // PATCH /spaces/:spaceId
+      : `${API_BASE}/branches/${selectedBranchId.value}/spaces`; // POST /branches/:branchId/spaces
+
+    const method = isEditing ? "PATCH" : "POST";
 
     const res = await fetch(url, {
       method,
@@ -227,7 +354,16 @@ async function saveSpace() {
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) throw new Error("failed to save space");
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(
+        "saveSpace failed:",
+        res.status,
+        res.statusText,
+        text
+      );
+      throw new Error("failed to save space");
+    }
 
     await loadSpaces();
     spaceDialog.value = false;
@@ -239,8 +375,24 @@ async function saveSpace() {
 }
 
 async function deleteSpace(id: string) {
+  const ok = window.confirm(
+    "Tem certeza que deseja excluir este espaço? Essa ação não pode ser desfeita."
+  );
+  if (!ok) return;
+
   try {
-    await fetch(`${API_BASE}/spaces/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/spaces/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(
+        "deleteSpace failed:",
+        res.status,
+        res.statusText,
+        text
+      );
+      throw new Error("failed to delete space");
+    }
+
     spaces.value = spaces.value.filter((s) => s.id !== id);
   } catch (err) {
     console.error("deleteSpace failed:", err);
@@ -282,15 +434,43 @@ onMounted(() => {
           </v-card-title>
           <v-card-text>
             <v-form @submit.prevent="createBranch">
-              <v-text-field
-                v-model="branchForm.name"
-                label="Nome"
-                variant="outlined"
-                density="comfortable"
-                class="mb-3"
-                hide-details="auto"
-                required
-              />
+              <v-row dense>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="branchForm.name"
+                    label="Nome da filial"
+                    variant="outlined"
+                    density="comfortable"
+                    class="mb-2"
+                    hide-details="auto"
+                    required
+                  />
+                </v-col>
+                <v-col cols="8">
+                  <v-text-field
+                    v-model="branchForm.city"
+                    label="Cidade"
+                    variant="outlined"
+                    density="comfortable"
+                    class="mb-2"
+                    hide-details="auto"
+                    required
+                  />
+                </v-col>
+                <v-col cols="4">
+                  <v-text-field
+                    v-model="branchForm.state"
+                    label="UF"
+                    maxlength="2"
+                    variant="outlined"
+                    density="comfortable"
+                    class="mb-2"
+                    hide-details="auto"
+                    required
+                  />
+                </v-col>
+              </v-row>
+
               <v-textarea
                 v-model="branchForm.address"
                 label="Endereço completo"
@@ -302,6 +482,7 @@ onMounted(() => {
                 class="mb-4"
                 required
               />
+
               <v-btn
                 type="submit"
                 color="primary"
@@ -328,10 +509,10 @@ onMounted(() => {
               v-model="searchText"
               density="compact"
               variant="outlined"
-              placeholder="Buscar por nome ou endereço"
+              placeholder="Buscar por nome, cidade, UF ou endereço"
               prepend-inner-icon="mdi-magnify"
               hide-details
-              style="max-width: 280px"
+              style="max-width: 320px"
             />
           </v-card-title>
 
@@ -346,18 +527,25 @@ onMounted(() => {
               density="compact"
               hover
             >
+              <template #item.cityState="{ item }">
+                <span>
+                  {{ (item as Branch).city }} /
+                  {{ (item as Branch).state }}
+                </span>
+              </template>
+
               <template #item.created_at="{ value }">
                 <span>{{ formatDate(value) }}</span>
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex ga-1">
+                <div class="d-flex justify-center ga-1">
                   <v-btn
                     size="small"
-                    variant="text"
+                    variant="outlined"
                     color="primary"
                     class="text-none"
-                    @click.stop="selectBranch(item.raw as Branch)"
+                    @click.stop="selectBranch(item as Branch)"
                   >
                     Espaços
                   </v-btn>
@@ -366,7 +554,7 @@ onMounted(() => {
                     variant="text"
                     color="error"
                     icon="mdi-delete-outline"
-                    @click.stop="deleteBranch((item.raw as Branch).id)"
+                    @click.stop="deleteBranch((item as Branch).id)"
                   />
                 </div>
               </template>
@@ -388,7 +576,8 @@ onMounted(() => {
                 Espaços da filial {{ selectedBranch.name }}
               </div>
               <div class="text-caption text-medium-emphasis">
-                Cadastre foto, capacidade e valor de diária para cada espaço.
+                Cadastre capacidade e preço por hora para cada espaço, além de
+                uma foto de capa.
               </div>
             </div>
 
@@ -415,7 +604,7 @@ onMounted(() => {
               >
                 <v-card class="h-100">
                   <v-img
-                    :src="space.image_url || defaultSpaceImage"
+                    :src="space.cover_url || defaultSpaceImage"
                     height="150"
                     cover
                   >
@@ -439,9 +628,11 @@ onMounted(() => {
                   </v-card-subtitle>
 
                   <v-card-text class="pt-1">
-                    <div v-if="space.daily_price != null">
-                      Diária a partir de
-                      <strong>R$ {{ formatMoney(space.daily_price) }}</strong>
+                    <div v-if="space.price_per_hour != null">
+                      Valor por hora
+                      <strong>
+                        R$ {{ formatMoney(space.price_per_hour) }}
+                      </strong>
                     </div>
                     <div
                       v-if="space.description"
@@ -543,35 +734,52 @@ onMounted(() => {
               </v-col>
               <v-col cols="12" sm="6">
                 <v-text-field
-                  v-model.number="spaceForm.daily_price"
+                  v-model.number="spaceForm.price_per_hour"
                   type="number"
                   min="0"
                   step="0.01"
                   prefix="R$"
-                  label="Valor da diária"
+                  label="Preço por hora"
                   variant="outlined"
                   density="comfortable"
                   hide-details="auto"
                 />
               </v-col>
             </v-row>
-            <v-text-field
-              v-model="spaceForm.image_url"
-              label="URL da foto"
+
+            <!-- Upload da foto -->
+            <v-file-input
+              :key="fileInputKey"
+              label="Upload da foto de capa"
+              prepend-icon="mdi-image"
               variant="outlined"
               density="comfortable"
               hide-details="auto"
-              class="mt-2"
-              hint="Cole um link de imagem (JPG, PNG...)"
-              persistent-hint
+              class="mt-2 mb-2"
+              accept="image/*"
+              show-size
+              :loading="uploadingSpaceImage"
+              @update:model-value="handleSpaceImageSelected"
             />
+
+            <!-- Preview + botão pra remover -->
             <v-img
               v-if="spaceForm.image_url"
               :src="spaceForm.image_url"
               height="150"
               cover
               class="mt-3 rounded-lg"
-            />
+              style="position: relative"
+            >
+              <v-btn
+                size="small"
+                icon="mdi-close"
+                color="error"
+                variant="elevated"
+                style="position: absolute; top: 4px; right: 4px; min-width: 0"
+                @click.stop="clearSpaceImage"
+              />
+            </v-img>
           </v-form>
         </v-card-text>
         <v-card-actions class="justify-end">

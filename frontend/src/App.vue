@@ -5,14 +5,39 @@
 
       <v-spacer />
 
-      <v-btn variant="text" to="/branches" router>Filiais</v-btn>
-      <v-btn variant="text" to="/reservations" router>Reservas & Pagamentos</v-btn>
+      <!-- Filiais + Espaços -->
+      <v-btn variant="text" to="/branches" router>
+        Filiais & Espaços
+      </v-btn>
+
+      <!-- Reservas -->
+      <v-btn variant="text" to="/reservations" router>
+        Reservas
+      </v-btn>
+
+      <!-- Pagamentos -->
+      <v-btn variant="text" to="/payments" router>
+        Pagamentos
+      </v-btn>
+
+      <!-- Usuários / Clientes -->
+      <v-btn variant="text" to="/users" router>
+        Clientes
+      </v-btn>
     </v-app-bar>
 
     <v-main>
       <v-container class="py-6">
-        <router-view />
+        <!-- Mantém estado das views ao trocar de aba -->
+        <router-view v-slot="{ Component }">
+          <keep-alive>
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </v-container>
     </v-main>
   </v-app>
 </template>
+
+<script setup lang="ts">
+</script>

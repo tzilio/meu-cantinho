@@ -1,18 +1,17 @@
 import { Request, Response } from 'express';
-import { pool } from 'db';
+import { pool } from '../db';
 import { v4 as uuid } from 'uuid';
 
 type BranchRecord = {
   id: string;
   name: string;
-  address: string | null;
+  state: string;
+  city: string;
+  address: string;
   created_at: string | null;
   updated_at: string | null;
 };
 
-/**
- * Carrega uma filial pelo ID ou responde 404.
- */
 async function fetchBranchOr404(id: string, res: Response): Promise<BranchRecord | undefined> {
   const result = await pool.query('SELECT * FROM branches WHERE id = $1', [id]);
   if (!result.rows[0]) {
@@ -27,7 +26,7 @@ async function fetchBranchOr404(id: string, res: Response): Promise<BranchRecord
  * /branches:
  *   post:
  *     summary: Cadastra uma nova filial
- *     description: 'Cria uma filial informando nome e endereço completo.'
+ *     description: 'Cria uma filial informando nome, estado, cidade e endereço completo.'
  *     tags: [Branches]
  *     requestBody:
  *       required: true
@@ -35,14 +34,20 @@ async function fetchBranchOr404(id: string, res: Response): Promise<BranchRecord
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, address]
+ *             required: [name, state, city, address]
  *             properties:
  *               name:
  *                 type: string
  *                 example: 'Unidade Centro'
+ *               state:
+ *                 type: string
+ *                 example: 'PR'
+ *               city:
+ *                 type: string
+ *                 example: 'Curitiba'
  *               address:
  *                 type: string
- *                 example: 'Rua XV de Novembro, 123 - Centro, Curitiba/PR'
+ *                 example: 'Rua XV de Novembro, 123 - Centro'
  *     responses:
  *       201:
  *         description: 'Filial criada com sucesso.'
@@ -55,22 +60,35 @@ async function fetchBranchOr404(id: string, res: Response): Promise<BranchRecord
  */
 export const registerBranch = async (req: Request, res: Response) => {
   try {
-    const { name, address } = req.body as {
+    const { name, state, city, address } = req.body as {
       name?: string;
+      state?: string;
+      city?: string;
       address?: string;
     };
 
-    if (!name || !name.trim() || !address || !address.trim()) {
-      return res.status(400).json({ error: 'name_and_address_required' });
+    if (
+      !name?.trim() ||
+      !state?.trim() ||
+      !city?.trim() ||
+      !address?.trim()
+    ) {
+      return res.status(400).json({ error: 'name_state_city_address_required' });
     }
 
     const id = uuid();
     const insertSql = `
-      INSERT INTO branches (id, name, address)
-      VALUES ($1, $2, $3)
-      RETURNING id, name, address, created_at, updated_at
+      INSERT INTO branches (id, name, state, city, address)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, state, city, address, created_at, updated_at
     `;
-    const { rows } = await pool.query(insertSql, [id, name.trim(), address.trim()]);
+    const { rows } = await pool.query(insertSql, [
+      id,
+      name.trim(),
+      state.trim(),
+      city.trim(),
+      address.trim(),
+    ]);
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('registerBranch failed:', err);
@@ -83,7 +101,7 @@ export const registerBranch = async (req: Request, res: Response) => {
  * /branches:
  *   get:
  *     summary: Busca filiais
- *     description: 'Pesquisa filiais opcionalmente pelo trecho do nome ou do endereço.'
+ *     description: 'Pesquisa filiais opcionalmente pelo trecho do nome, cidade, estado ou endereço.'
  *     tags: [Branches]
  *     parameters:
  *       - in: query
@@ -92,7 +110,7 @@ export const registerBranch = async (req: Request, res: Response) => {
  *         schema:
  *           type: string
  *           example: 'Curitiba'
- *         description: 'Trecho do nome ou endereço para filtro.'
+ *         description: 'Trecho do nome, cidade, estado ou endereço.'
  *     responses:
  *       200:
  *         description: 'Lista de filiais encontradas.'
@@ -107,27 +125,28 @@ export const searchBranches = async (req: Request, res: Response) => {
   try {
     const { q } = req.query as { q?: string };
 
+    const baseSelect = `
+      SELECT id, name, state, city, address, created_at, updated_at
+      FROM branches
+    `;
+
     if (!q || !q.trim()) {
       const { rows } = await pool.query(
-        `
-          SELECT id, name, address, created_at, updated_at
-          FROM branches
-          ORDER BY created_at DESC, name ASC
-        `
+        `${baseSelect} ORDER BY created_at DESC, name ASC`
       );
       return res.json(rows);
     }
 
     const term = `%${q.trim()}%`;
-    const { rows } = await pool.query(
-      `
-        SELECT id, name, address, created_at, updated_at
-        FROM branches
-        WHERE name ILIKE $1 OR address ILIKE $1
-        ORDER BY created_at DESC, name ASC
-      `,
-      [term]
-    );
+    const sql = `
+      ${baseSelect}
+      WHERE name ILIKE $1
+         OR city ILIKE $1
+         OR state ILIKE $1
+         OR address ILIKE $1
+      ORDER BY created_at DESC, name ASC
+    `;
+    const { rows } = await pool.query(sql, [term]);
     res.json(rows);
   } catch (err) {
     console.error('searchBranches failed:', err);
@@ -174,7 +193,7 @@ export const getBranchById = async (req: Request, res: Response) => {
  * /branches/{id}:
  *   patch:
  *     summary: Atualiza parcialmente uma filial
- *     description: 'Permite alterar nome e/ou endereço. Campos não enviados são mantidos.'
+ *     description: 'Permite alterar nome, estado, cidade e/ou endereço. Campos não enviados são mantidos.'
  *     tags: [Branches]
  *     parameters:
  *       - in: path
@@ -192,15 +211,15 @@ export const getBranchById = async (req: Request, res: Response) => {
  *             properties:
  *               name:
  *                 type: string
+ *               state:
+ *                 type: string
+ *               city:
+ *                 type: string
  *               address:
  *                 type: string
  *     responses:
  *       200:
  *         description: 'Filial atualizada.'
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Branch'
  *       400:
  *         description: 'Nenhum campo informado para atualização.'
  *       404:
@@ -209,28 +228,38 @@ export const getBranchById = async (req: Request, res: Response) => {
 export const patchBranch = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, address } = req.body as {
+    const { name, state, city, address } = req.body as {
       name?: string;
+      state?: string;
+      city?: string;
       address?: string;
     };
 
-    if (name === undefined && address === undefined) {
+    if (
+      name === undefined &&
+      state === undefined &&
+      city === undefined &&
+      address === undefined
+    ) {
       return res.status(400).json({ error: 'no_fields_to_update' });
     }
 
-    // Usando COALESCE, se vier undefined converte pra null e mantém valor atual
     const sql = `
       UPDATE branches
          SET name       = COALESCE($2, name),
-             address    = COALESCE($3, address),
+             state      = COALESCE($3, state),
+             city       = COALESCE($4, city),
+             address    = COALESCE($5, address),
              updated_at = NOW()
        WHERE id = $1
-       RETURNING id, name, address, created_at, updated_at
+       RETURNING id, name, state, city, address, created_at, updated_at
     `;
 
     const { rows } = await pool.query(sql, [
       id,
       name ?? null,
+      state ?? null,
+      city ?? null,
       address ?? null,
     ]);
 
@@ -298,12 +327,6 @@ export const removeBranch = async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: 'Espaços da filial.'
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Space'
  *       404:
  *         description: 'Filial não encontrada.'
  */
@@ -335,9 +358,15 @@ export const listBranchSpaces = async (req: Request, res: Response) => {
  *           format: uuid
  *         name:
  *           type: string
+ *         state:
+ *           type: string
+ *           example: 'PR'
+ *         city:
+ *           type: string
+ *           example: 'Curitiba'
  *         address:
  *           type: string
- *           example: 'Rua XV de Novembro, 123 - Centro, Curitiba/PR'
+ *           example: 'Rua XV de Novembro, 123 - Centro'
  *         created_at:
  *           type: string
  *           format: date-time

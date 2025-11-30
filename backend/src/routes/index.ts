@@ -2,18 +2,28 @@
 import { Router } from 'express';
 
 import {
-  createUser,
-  listUsers,
-  fetchUser,
-  updateUser,
-  removeUser,
-} from '../controllers/user';
+  registerBranch,
+  searchBranches,
+  getBranchById,
+  patchBranch,
+  removeBranch,
+  listBranchSpaces,
+} from '../controllers/branch';
+
+import {
+  createCustomer,
+  listCustomers,
+  fetchCustomer,
+  updateCustomer,
+  removeCustomer,
+} from '../controllers/customer';
 
 import {
   createSpace,
   listSpacesByBranch,
   fetchSpace,
   updateSpace,
+  deleteSpace
 } from '../controllers/space';
 
 import {
@@ -26,20 +36,21 @@ import {
 import {
   registerPayment,
   fetchPayment,
-  settlePayment,
+  confirmPayment,
   removePayment,
+  listPayments,
 } from '../controllers/payment';
 
 const router = Router();
 
 /**
- * USERS
+ * CUSTOMERS
  */
-router.post('/users', createUser);
-router.get('/users', listUsers);
-router.get('/users/:userId', fetchUser);
-router.patch('/users/:userId', updateUser);
-router.delete('/users/:userId', removeUser);
+router.post('/customers', createCustomer);
+router.get('/customers', listCustomers);
+router.get('/customers/:customerId', fetchCustomer);
+router.patch('/customers/:customerId', updateCustomer);
+router.delete('/customers/:customerId', removeCustomer);
 
 /**
  * SPACES
@@ -49,6 +60,7 @@ router.post('/branches/:branchId/spaces', createSpace);
 router.get('/branches/:branchId/spaces', listSpacesByBranch);
 router.get('/spaces/:spaceId', fetchSpace);
 router.patch('/spaces/:spaceId', updateSpace);
+router.delete('/spaces/:spaceId', deleteSpace);
 
 /**
  * RESERVATIONS
@@ -61,11 +73,18 @@ router.patch('/reservations/:reservationId/cancel', cancelReservation);
 
 /**
  * PAYMENTS
- * pagamentos associados a uma reserva (bookingId no controller)
+ * pagamentos associados a uma reserva
  */
-router.post('/bookings/:bookingId/payments', registerPayment);
+router.get('/payments', listPayments);
+router.post('/reservations/:reservationId/payments', registerPayment);
 router.get('/payments/:paymentId', fetchPayment);
-router.patch('/payments/:paymentId/settle', settlePayment);
+router.post('/payments/:paymentId/confirm', confirmPayment);
 router.delete('/payments/:paymentId', removePayment);
+
+router.post('/branches', registerBranch);
+router.get('/branches', searchBranches);
+router.get('/branches/:id', getBranchById);
+router.patch('/branches/:id', patchBranch);
+router.delete('/branches/:id', removeBranch);
 
 export default router;

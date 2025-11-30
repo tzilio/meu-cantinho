@@ -1,15 +1,26 @@
 // src/controllers/payment.ts
 import { Request, Response } from 'express';
-import { pool } from 'db';
+import { pool } from '../db';
 import { v4 as uuid } from 'uuid';
 
 type SqlParam = string | number | null;
-
 
 function sendInternalError(res: Response, err: unknown, context: string) {
   console.error(`[payments:${context}]`, err);
   return res.status(500).json({ error: 'internal_error', context });
 }
+
+type PaymentRow = {
+  id: string;
+  reservation_id: string;
+  amount: number;
+  method: string;
+  status: string;
+  purpose: string;
+  paid_at: string | null;
+  external_ref: string | null;
+  created_at: string | null;
+};
 
 /**
  * @openapi
@@ -21,38 +32,25 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *         id:
  *           type: string
  *           format: uuid
- *         booking_id:
+ *         reservation_id:
  *           type: string
  *           format: uuid
- *         gross_amount:
+ *         amount:
  *           type: number
  *           format: float
- *           description: "Valor bruto informado na cobrança."
- *         fee_amount:
- *           type: number
- *           format: float
- *           description: "Taxas de processamento ou tarifas bancárias."
- *         net_amount:
- *           type: number
- *           format: float
- *           description: "Valor líquido considerado para a reserva (bruto - taxa)."
- *         channel:
+ *         method:
  *           type: string
- *           example: "PIX"
- *           description: "Canal de pagamento (PIX, CARTAO, DINHEIRO, etc.)."
+ *           enum: [PIX, CARD, CASH, BOLETO]
  *         status:
  *           type: string
- *           enum: [PENDING, CLEARED]
- *           example: "PENDING"
- *         kind:
+ *           enum: [PENDING, PAID, CANCELLED, REFUNDED]
+ *         purpose:
  *           type: string
- *           example: "DEPOSIT"
- *           description: "Tipo de pagamento: sinal, restante, valor integral, etc."
- *         provider_code:
+ *           enum: [DEPOSIT, BALANCE]
+ *         external_ref:
  *           type: string
  *           nullable: true
- *           description: "Identificador do pagamento no provedor externo."
- *         cleared_at:
+ *         paid_at:
  *           type: string
  *           format: date-time
  *           nullable: true
@@ -60,53 +58,44 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *           type: string
  *           format: date-time
  *           nullable: true
- *         updated_at:
- *           type: string
- *           format: date-time
- *           nullable: true
  */
 
 /**
  * @openapi
- * /bookings/{bookingId}/payments:
+ * /reservations/{reservationId}/payments:
  *   post:
- *     summary: Registra um lançamento financeiro para uma reserva
- *     description: "Associa um novo pagamento (sinal, restante ou integral) a uma reserva existente, iniciando com status PENDING."
+ *     summary: Registra um pagamento para uma reserva
+ *     description: "Cria um pagamento vinculado à reserva, iniciando com status PENDING."
  *     tags: [Payments]
  *     parameters:
  *       - in: path
- *         name: bookingId
+ *         name: reservationId
  *         required: true
  *         schema:
  *           type: string
  *           format: uuid
- *         description: "Identificador da reserva (booking)."
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [gross_amount, channel]
+ *             required: [amount, method]
  *             properties:
- *               gross_amount:
+ *               amount:
  *                 type: number
  *                 format: float
  *                 example: 500.0
- *               fee_amount:
- *                 type: number
- *                 format: float
- *                 example: 5.0
- *               channel:
+ *               method:
  *                 type: string
  *                 example: "PIX"
- *               kind:
+ *               purpose:
  *                 type: string
+ *                 enum: [DEPOSIT, BALANCE]
  *                 example: "DEPOSIT"
- *               provider_code:
+ *               external_ref:
  *                 type: string
  *                 nullable: true
- *                 example: "MPAY-123"
  *     responses:
  *       201:
  *         description: "Pagamento criado."
@@ -117,70 +106,69 @@ function sendInternalError(res: Response, err: unknown, context: string) {
  *       400:
  *         description: "Dados inválidos."
  *       404:
- *         description: "Reserva (booking) não encontrada."
+ *         description: "Reserva não encontrada."
  */
 export const registerPayment = async (req: Request, res: Response) => {
   try {
-    const { bookingId } = req.params;
+    const { reservationId } = req.params;
     const {
-      gross_amount,
-      fee_amount,
-      channel,
-      kind,
-      provider_code,
+      amount,
+      method,
+      purpose,
+      external_ref,
     } = req.body as {
-      gross_amount?: number;
-      fee_amount?: number;
-      channel?: string;
-      kind?: string;
-      provider_code?: string | null;
+      amount?: number;
+      method?: string;
+      purpose?: string;
+      external_ref?: string | null;
     };
 
-    if (gross_amount == null || isNaN(Number(gross_amount)) || Number(gross_amount) <= 0) {
-      return res.status(400).json({ error: 'invalid_gross_amount' });
+    if (amount == null || isNaN(Number(amount)) || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'invalid_amount' });
     }
-    if (!channel || typeof channel !== 'string') {
-      return res.status(400).json({ error: 'invalid_channel' });
+    if (!method || typeof method !== 'string') {
+      return res.status(400).json({ error: 'invalid_method' });
     }
 
     // Verifica se a reserva existe
-    const bookingCheck = await pool.query(
+    const reservationCheck = await pool.query(
       'SELECT id FROM reservations WHERE id = $1',
-      [bookingId],
+      [reservationId],
     );
-    if (bookingCheck.rowCount === 0) {
-      return res.status(404).json({ error: 'booking_not_found' });
+    if (reservationCheck.rowCount === 0) {
+      return res.status(404).json({ error: 'reservation_not_found' });
     }
 
-    const paymentId = uuid();
-    const fee = fee_amount != null && !isNaN(Number(fee_amount)) && Number(fee_amount) >= 0
-      ? Number(fee_amount)
-      : 0;
-
-    const net = Number(gross_amount) - fee;
-
-    const params: SqlParam[] = [
-      paymentId,
-      bookingId,
-      Number(gross_amount),
-      fee,
-      net,
-      channel,
-      'PENDING',
-      kind ?? 'DEPOSIT',
-      provider_code ?? null,
-    ];
+    const id = uuid();
+    const finalPurpose = purpose && purpose.trim() ? purpose.trim() : 'DEPOSIT';
 
     const sql = `
       INSERT INTO payments
-        (id, booking_id, gross_amount, fee_amount, net_amount,
-         channel, status, kind, provider_code)
+        (id, reservation_id, amount, method, status, purpose, external_ref)
       VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *;
+        ($1, $2, $3, $4, 'PENDING', $5, $6)
+      RETURNING
+        id,
+        reservation_id,
+        amount::float8   AS amount,
+        method,
+        status,
+        purpose,
+        external_ref,
+        paid_at,
+        created_at
     `;
 
-    const { rows } = await pool.query(sql, params);
+    const params: SqlParam[] = [
+      id,
+      reservationId,
+      Number(amount),
+      method,
+      finalPurpose,
+      external_ref ?? null,
+    ];
+
+    const { rows } = await pool.query<PaymentRow>(sql, params);
     return res.status(201).json(rows[0]);
   } catch (err) {
     return sendInternalError(res, err, 'registerPayment');
@@ -213,7 +201,21 @@ export const registerPayment = async (req: Request, res: Response) => {
 export const fetchPayment = async (req: Request, res: Response) => {
   try {
     const { paymentId } = req.params;
-    const { rows } = await pool.query('SELECT * FROM payments WHERE id = $1', [paymentId]);
+    const sql = `
+      SELECT
+        id,
+        reservation_id,
+        amount::float8 AS amount,
+        method,
+        status,
+        purpose,
+        external_ref,
+        paid_at,
+        created_at
+      FROM payments
+      WHERE id = $1
+    `;
+    const { rows } = await pool.query<PaymentRow>(sql, [paymentId]);
 
     if (!rows[0]) {
       return res.status(404).json({ error: 'payment_not_found' });
@@ -226,10 +228,10 @@ export const fetchPayment = async (req: Request, res: Response) => {
 
 /**
  * @openapi
- * /payments/{paymentId}/settle:
- *   patch:
- *     summary: Marca um pagamento como liquidado (CLEARED)
- *     description: "Altera o status para CLEARED e registra a data/hora de liquidação."
+ * /payments/{paymentId}/confirm:
+ *   post:
+ *     summary: Confirma um pagamento
+ *     description: "Altera o status para PAID e registra data/hora do pagamento."
  *     tags: [Payments]
  *     parameters:
  *       - in: path
@@ -245,56 +247,58 @@ export const fetchPayment = async (req: Request, res: Response) => {
  *           schema:
  *             type: object
  *             properties:
- *               provider_code:
+ *               external_ref:
  *                 type: string
  *                 nullable: true
- *                 example: "gateway-xyz-999"
- *               settled_at:
+ *               paid_at:
  *                 type: string
  *                 format: date-time
  *                 nullable: true
- *                 description: "Se omitido, será usado NOW() do banco."
  *     responses:
  *       200:
- *         description: "Pagamento liquidado."
- *         content:
- *           application/json:
- *             schema:
- *               $ref: "#/components/schemas/Payment"
+ *         description: "Pagamento confirmado."
  *       404:
  *         description: "Pagamento não encontrado."
  */
-export const settlePayment = async (req: Request, res: Response) => {
+export const confirmPayment = async (req: Request, res: Response) => {
   try {
     const { paymentId } = req.params;
-    const { provider_code, settled_at } = req.body as {
-      provider_code?: string | null;
-      settled_at?: string | null;
+    const { external_ref, paid_at } = req.body as {
+      external_ref?: string | null;
+      paid_at?: string | null;
     };
 
-    const existing = await pool.query(
+    const exists = await pool.query(
       'SELECT status FROM payments WHERE id = $1',
       [paymentId],
     );
-    if (!existing.rows[0]) {
+    if (!exists.rows[0]) {
       return res.status(404).json({ error: 'payment_not_found' });
     }
 
     const sql = `
       UPDATE payments
-      SET status        = 'CLEARED',
-          cleared_at    = COALESCE($2::timestamptz, NOW()),
-          provider_code = COALESCE($3, provider_code),
-          updated_at    = NOW()
+      SET status      = 'PAID',
+          paid_at     = COALESCE($2::timestamptz, NOW()),
+          external_ref= COALESCE($3, external_ref)
       WHERE id = $1
-      RETURNING *;
+      RETURNING
+        id,
+        reservation_id,
+        amount::float8 AS amount,
+        method,
+        status,
+        purpose,
+        external_ref,
+        paid_at,
+        created_at
     `;
-    const params: SqlParam[] = [paymentId, settled_at ?? null, provider_code ?? null];
-    const { rows } = await pool.query(sql, params);
+    const params: SqlParam[] = [paymentId, paid_at ?? null, external_ref ?? null];
+    const { rows } = await pool.query<PaymentRow>(sql, params);
 
     return res.json(rows[0]);
   } catch (err) {
-    return sendInternalError(res, err, 'settlePayment');
+    return sendInternalError(res, err, 'confirmPayment');
   }
 };
 
@@ -302,8 +306,7 @@ export const settlePayment = async (req: Request, res: Response) => {
  * @openapi
  * /payments/{paymentId}:
  *   delete:
- *     summary: Exclui um lançamento de pagamento
- *     description: "Remoção permitida apenas se o pagamento não estiver CLEARED."
+ *     summary: Remove um pagamento (apenas se não estiver PAID)
  *     tags: [Payments]
  *     parameters:
  *       - in: path
@@ -332,14 +335,186 @@ export const removePayment = async (req: Request, res: Response) => {
     if (!lookup.rows[0]) {
       return res.status(404).json({ error: 'payment_not_found' });
     }
-    if (lookup.rows[0].status === 'CLEARED') {
-      return res.status(400).json({ error: 'cannot_delete_cleared_payment' });
+    if (lookup.rows[0].status === 'PAID') {
+      return res.status(400).json({ error: 'cannot_delete_paid_payment' });
     }
 
     await pool.query('DELETE FROM payments WHERE id = $1', [paymentId]);
     return res.status(204).send();
   } catch (err) {
     return sendInternalError(res, err, 'removePayment');
+  }
+};
+
+/**
+ * @openapi
+ * /payments:
+ *   get:
+ *     summary: Lista pagamentos com filtros opcionais
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: branch_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         required: false
+ *         description: Filtra pela filial (branch) da reserva.
+ *       - in: query
+ *         name: space_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         required: false
+ *         description: Filtra pelo espaço da reserva.
+ *       - in: query
+ *         name: customer_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         required: false
+ *         description: Filtra pelo cliente (usuário com role CUSTOMER).
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filtra status do pagamento (PENDING, PAID, ...).
+ *       - in: query
+ *         name: method
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filtra método de pagamento (PIX, CARD, CASH, BOLETO).
+ *       - in: query
+ *         name: purpose
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filtra tipo do pagamento (DEPOSIT, BALANCE).
+ *       - in: query
+ *         name: from_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         required: false
+ *         description: Data mínima da reserva (YYYY-MM-DD).
+ *       - in: query
+ *         name: to_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         required: false
+ *         description: Data máxima da reserva (YYYY-MM-DD).
+ *     responses:
+ *       200:
+ *         description: Lista de pagamentos com informações agregadas da reserva, cliente, espaço e filial.
+ */
+export const listPayments = async (req: Request, res: Response) => {
+  try {
+    const {
+      branch_id,
+      space_id,
+      customer_id,
+      status,
+      method,
+      purpose,
+      from_date,
+      to_date,
+    } = req.query as {
+      branch_id?: string;
+      space_id?: string;
+      customer_id?: string;
+      status?: string;
+      method?: string;
+      purpose?: string;
+      from_date?: string;
+      to_date?: string;
+    };
+
+    let sql = `
+      SELECT
+        p.id,
+        p.reservation_id,
+        p.amount::float8 AS amount,
+        p.method,
+        p.status,
+        p.purpose,
+        p.external_ref,
+        p.paid_at,
+        p.created_at,
+
+        r.date,
+        r.start_time,
+        r.end_time,
+        r.status AS reservation_status,
+        r.total_amount,
+        r.deposit_pct,
+        r.customer_id,
+
+        s.id   AS space_id,
+        s.name AS space_name,
+
+        b.id   AS branch_id,
+        b.name AS branch_name,
+
+        u.name  AS customer_name,
+        u.email AS customer_email,
+        u.phone AS customer_phone
+      FROM payments p
+      JOIN reservations r ON r.id = p.reservation_id
+      JOIN spaces       s ON s.id = r.space_id
+      JOIN branches     b ON b.id = r.branch_id
+      JOIN users        u ON u.id = r.customer_id
+    `;
+
+    const conditions: string[] = [];
+    const params: SqlParam[] = [];
+    let idx = 1;
+
+    if (branch_id) {
+      conditions.push(`b.id = $${idx++}`);
+      params.push(branch_id);
+    }
+    if (space_id) {
+      conditions.push(`s.id = $${idx++}`);
+      params.push(space_id);
+    }
+    if (customer_id) {
+      conditions.push(`u.id = $${idx++}`);
+      params.push(customer_id);
+    }
+    if (status) {
+      conditions.push(`p.status = $${idx++}`);
+      params.push(status);
+    }
+    if (method) {
+      conditions.push(`p.method = $${idx++}`);
+      params.push(method);
+    }
+    if (purpose) {
+      conditions.push(`p.purpose = $${idx++}`);
+      params.push(purpose);
+    }
+    if (from_date) {
+      conditions.push(`r.date >= $${idx++}::date`);
+      params.push(from_date);
+    }
+    if (to_date) {
+      conditions.push(`r.date <= $${idx++}::date`);
+      params.push(to_date);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY p.created_at DESC, p.id DESC';
+
+    const { rows } = await pool.query(sql, params);
+    return res.json(rows);
+  } catch (err) {
+    return sendInternalError(res, err, 'listPayments');
   }
 };
 

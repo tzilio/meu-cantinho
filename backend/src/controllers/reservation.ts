@@ -1,6 +1,6 @@
 // src/controllers/reservation.ts
 import { Request, Response } from 'express';
-import { pool } from 'db';
+import { pool } from '../db';
 import { v4 as uuid } from 'uuid';
 
 type SqlParam = string | number | boolean | null;
