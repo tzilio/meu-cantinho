@@ -1,5 +1,5 @@
 -- ===========================================
--- Seu Cantinho - init.sql (versão customers, sem space_photos)
+-- Seu Cantinho - init.sql (versão corrigida)
 -- Branches + Spaces + Customers + Reservations + Payments
 -- ===========================================
 
@@ -29,7 +29,7 @@ CREATE TABLE spaces (
   description          TEXT,
   capacity             INT         NOT NULL,
   price_per_hour       NUMERIC(10,2) NOT NULL,
-  cover_url            TEXT,                    -- URL única da foto de capa
+  cover_url            TEXT,
   active               BOOLEAN     NOT NULL DEFAULT TRUE,
   created_at           TIMESTAMP   NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMP   NOT NULL DEFAULT NOW(),
@@ -42,7 +42,7 @@ CREATE TABLE spaces (
   CONSTRAINT chk_spaces_price CHECK (price_per_hour >= 0)
 );
 
--- Índice para buscas por filial + ativo
+-- Índice otimizado
 CREATE INDEX idx_spaces_branch_active
   ON spaces (branch_id, active);
 
@@ -62,7 +62,6 @@ CREATE INDEX idx_customers_email ON customers (email);
 
 -- ===========================================
 -- RESERVATIONS (reservas)
--- vinculam um Space, uma Branch e um Customer
 -- ===========================================
 CREATE TABLE reservations (
   id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -70,13 +69,15 @@ CREATE TABLE reservations (
   branch_id            UUID NOT NULL,
   customer_id          UUID NOT NULL,
 
-  date                 DATE NOT NULL,
+  check_in_date        DATE NOT NULL,
+  check_out_date       DATE NOT NULL,
+
   start_time           TIME NOT NULL,
   end_time             TIME NOT NULL,
 
-  status               TEXT NOT NULL DEFAULT 'PENDING', -- PENDING | CONFIRMED | CANCELLED
+  status               TEXT NOT NULL DEFAULT 'PENDING',
   total_amount         NUMERIC(10,2) NOT NULL,
-  deposit_pct          NUMERIC(5,2)  NOT NULL DEFAULT 0,
+  deposit_pct          NUMERIC(5,2) NOT NULL DEFAULT 0,
   notes                TEXT,
 
   created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -92,21 +93,22 @@ CREATE TABLE reservations (
   CONSTRAINT fk_reservations_customer
     FOREIGN KEY (customer_id) REFERENCES customers(id),
 
-  CONSTRAINT chk_reservations_time CHECK (end_time > start_time),
-  CONSTRAINT chk_reservations_status CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED')),
-  CONSTRAINT chk_reservations_amount CHECK (total_amount >= 0),
-  CONSTRAINT chk_reservations_deposit CHECK (deposit_pct >= 0 AND deposit_pct <= 100)
+  CONSTRAINT chk_reservations_dates
+    CHECK (check_out_date >= check_in_date),
+
+  CONSTRAINT chk_reservations_amount
+    CHECK (total_amount >= 0)
 );
 
--- Evita double booking simples
-CREATE UNIQUE INDEX uq_reservations_slot
-  ON reservations (space_id, date, start_time, end_time);
+-- Índices ajustados para o novo modelo (SEM date)
+CREATE INDEX idx_reservations_space_checkin
+  ON reservations (space_id, check_in_date, start_time);
 
-CREATE INDEX idx_reservations_space_date
-  ON reservations (space_id, date);
+CREATE INDEX idx_reservations_space_checkout
+  ON reservations (space_id, check_out_date, end_time);
 
-CREATE INDEX idx_reservations_branch_date
-  ON reservations (branch_id, date);
+CREATE INDEX idx_reservations_branch_checkin
+  ON reservations (branch_id, check_in_date);
 
 CREATE INDEX idx_reservations_customer
   ON reservations (customer_id);
