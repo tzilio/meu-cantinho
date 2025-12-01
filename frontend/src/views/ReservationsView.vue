@@ -47,6 +47,7 @@ type Reservation = {
   total_amount: number;
   deposit_pct: number;
   notes?: string | null;
+  adults_count?: number | null;
 };
 
 /**
@@ -74,7 +75,10 @@ const formEndTime = ref("");
 const formDepositPct = ref<number | null>(null);
 const formNotes = ref("");
 
-/** Filtro (filtra por check-in) */
+// novo campo: número de adultos
+const formAdults = ref<number | null>(null);
+
+/** Filtro (filtra por data dentro do período) */
 const filterDate = ref("");
 
 /**
@@ -83,7 +87,7 @@ const filterDate = ref("");
 const rules = {
   required: (v: any) => !!v || "Campo obrigatório",
   percent: (v: number) =>
-    (v >= 0 && v <= 100) || "Use um valor entre 0 e 100",
+    v == null || (v >= 0 && v <= 100) || "Use um valor entre 0 e 100",
   timeOrder: () =>
     !formStartTime.value ||
     !formEndTime.value ||
@@ -100,13 +104,12 @@ const rules = {
 /**
  * Helpers
  */
- function formatDate(value?: string | null): string {
+function formatDate(value?: string | null): string {
   if (!value) return "—";
   const clean = value.slice(0, 10); // AAAA-mm-dd
   const [y, m, d] = clean.split("-");
   return `${d}/${m}/${y}`;
 }
-
 
 function formatTime(value?: string | null): string {
   return value ? value.slice(0, 5) : "—";
@@ -120,11 +123,24 @@ function formatMoney(value?: number | null): string {
   });
 }
 
+function spaceOptionLabel(item: Space | any): string {
+  if (!item) return "";
+  const price = Number(item.price_per_hour ?? 0).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${item.name} — R$ ${price}/hora`;
+}
+
+
 function statusColor(status: Reservation["status"]): string {
   switch (status) {
-    case "CONFIRMED": return "success";
-    case "CANCELLED": return "error";
-    default: return "warning";
+    case "CONFIRMED":
+      return "success";
+    case "CANCELLED":
+      return "error";
+    default:
+      return "warning";
   }
 }
 
@@ -133,10 +149,67 @@ const spacesForSelectedBranch = computed(() => {
   return spaces.value.filter((s) => s.branch_id === formBranchId.value);
 });
 
+const selectedSpace = computed<Space | null>(() => {
+  if (!formSpaceId.value) return null;
+  return spaces.value.find((s) => s.id === formSpaceId.value) || null;
+});
+
+const adultsExceedCapacity = computed(() => {
+  if (!selectedSpace.value) return false;
+  if (formAdults.value == null) return false;
+  return formAdults.value > selectedSpace.value.capacity;
+});
+
+const adultsErrorMessage = computed(() => {
+  if (!adultsExceedCapacity.value || !selectedSpace.value) return "";
+  return `Capacidade máxima deste espaço é ${selectedSpace.value.capacity} adultos.`;
+});
+
 function customerName(customerId: string): string {
   const c = customers.value.find((u) => u.id === customerId);
   return c ? c.name : customerId;
 }
+
+/**
+ * Conflito de horário no front
+ * (mesma lógica conceitual do back, usando as reservas carregadas)
+ */
+const hasTimeConflict = computed(() => {
+  if (
+    !formSpaceId.value ||
+    !formCheckInDate.value ||
+    !formCheckOutDate.value ||
+    !formStartTime.value ||
+    !formEndTime.value
+  ) {
+    return false;
+  }
+
+  const newStart = new Date(
+    `${formCheckInDate.value}T${formStartTime.value}`,
+  );
+  const newEnd = new Date(`${formCheckOutDate.value}T${formEndTime.value}`);
+
+  // Se range já é inválido, deixa a regra timeOrder cuidar
+  if (!(newEnd > newStart)) return false;
+
+  return reservations.value.some((r) => {
+    if (r.space_id !== formSpaceId.value) return false;
+    if (r.status === "CANCELLED") return false;
+
+    const existingStart = new Date(`${r.check_in_date}T${r.start_time}`);
+    const existingEnd = new Date(`${r.check_out_date}T${r.end_time}`);
+
+    // conflito se [existingStart, existingEnd) intersecta [newStart, newEnd)
+    return existingStart < newEnd && newStart < existingEnd;
+  });
+});
+
+const timeConflictMessage = computed(() =>
+  hasTimeConflict.value
+    ? "Já existe outra reserva neste espaço que conflita com esse período."
+    : "",
+);
 
 /**
  * Carregamento de dados
@@ -154,7 +227,7 @@ async function loadCustomers() {
 async function loadSpacesForBranch(branchId: string) {
   loadingSpaces.value = true;
   const res = await fetch(
-    `${API_BASE}/branches/${branchId}/spaces?only_active=true`
+    `${API_BASE}/branches/${branchId}/spaces?only_active=true`,
   );
   spaces.value = res.ok ? await res.json() : [];
   loadingSpaces.value = false;
@@ -169,12 +242,13 @@ async function loadReservations() {
   loadingReservations.value = true;
 
   const params = new URLSearchParams();
-  if (filterDate.value) params.set("check_in_date", filterDate.value);
+  // no back o nome do parâmetro é "date"
+  if (filterDate.value) params.set("date", filterDate.value);
 
   const res = await fetch(
     `${API_BASE}/spaces/${formSpaceId.value}/reservations${
       params.toString() ? `?${params}` : ""
-    }`
+    }`,
   );
 
   reservations.value = res.ok ? await res.json() : [];
@@ -185,8 +259,17 @@ async function loadReservations() {
  * Criar reserva
  */
 async function createReservation() {
-  if (!formBranchId.value || !formSpaceId.value || !formCustomerId.value)
+  if (!formBranchId.value || !formSpaceId.value || !formCustomerId.value) return;
+
+  // valida adultos/capacidade no front também
+  if (formAdults.value == null || formAdults.value <= 0) {
+    alert("Informe o número de adultos.");
     return;
+  }
+  if (adultsExceedCapacity.value) {
+    alert("Número de adultos excede a capacidade deste espaço.");
+    return;
+  }
 
   // valida datas
   if (formCheckOutDate.value < formCheckInDate.value) {
@@ -202,6 +285,14 @@ async function createReservation() {
     return;
   }
 
+  // checa conflito de horário antes de chamar o back
+  if (hasTimeConflict.value) {
+    alert(
+      "Já existe uma reserva cadastrada para este espaço que conflita com esse período.",
+    );
+    return;
+  }
+
   savingReservation.value = true;
 
   try {
@@ -213,6 +304,7 @@ async function createReservation() {
       end_time: formEndTime.value,
       deposit_pct: formDepositPct.value ?? undefined,
       notes: formNotes.value.trim() || undefined,
+      adults_count: formAdults.value,
     };
 
     const res = await fetch(
@@ -221,24 +313,30 @@ async function createReservation() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }
+      },
     );
 
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Erro ao criar reserva:", text);
+      alert(
+        "Erro ao criar reserva (verifique conflitos de horário e capacidade).",
+      );
+      throw new Error(text);
+    }
 
     await loadReservations();
 
-    // limpa form
+    // limpa form (mantém seleção de filial/espaço/cliente)
     formCheckInDate.value = "";
     formCheckOutDate.value = "";
     formStartTime.value = "";
     formEndTime.value = "";
     formDepositPct.value = null;
     formNotes.value = "";
-
+    formAdults.value = null;
   } catch (err) {
     console.error(err);
-    alert("Erro ao criar reserva");
   }
 
   savingReservation.value = false;
@@ -271,7 +369,6 @@ onMounted(async () => {
 
 <template>
   <v-container class="py-8" fluid>
-
     <v-row>
       <v-col cols="12">
         <div class="mb-6">
@@ -287,14 +384,12 @@ onMounted(async () => {
       <!-- NOVA RESERVA -->
       <v-col cols="12" md="5">
         <v-card elevation="2">
-
           <v-card-title class="text-subtitle-1 font-weight-medium">
             Nova reserva
           </v-card-title>
 
           <v-card-text>
             <v-form @submit.prevent="createReservation">
-
               <!-- FILIAL -->
               <v-select
                 v-model="formBranchId"
@@ -312,7 +407,7 @@ onMounted(async () => {
               <v-select
                 v-model="formSpaceId"
                 :items="spacesForSelectedBranch"
-                item-title="name"
+                :item-title="spaceOptionLabel"
                 item-value="id"
                 label="Espaço"
                 :loading="loadingSpaces"
@@ -322,6 +417,7 @@ onMounted(async () => {
                 clearable
                 class="mb-3"
               />
+
 
               <!-- CLIENTE -->
               <v-select
@@ -334,6 +430,26 @@ onMounted(async () => {
                 :rules="[rules.required]"
                 clearable
                 class="mb-3"
+              />
+
+              <!-- NÚMERO DE ADULTOS -->
+              <v-text-field
+                v-model.number="formAdults"
+                type="number"
+                min="1"
+                label="Número de adultos"
+                density="comfortable"
+                class="mb-3"
+                :rules="[rules.required]"
+                :disabled="!formSpaceId"
+                :error="adultsExceedCapacity"
+                :error-messages="adultsExceedCapacity ? adultsErrorMessage : ''"
+                :hint="
+                  selectedSpace
+                    ? `Capacidade do espaço: ${selectedSpace.capacity} adultos`
+                    : ''
+                "
+                persistent-hint
               />
 
               <!-- DATAS -->
@@ -378,6 +494,10 @@ onMounted(async () => {
                     label="Hora fim"
                     density="comfortable"
                     :rules="[rules.required, rules.timeOrder]"
+                    :error="hasTimeConflict"
+                    :error-messages="hasTimeConflict ? timeConflictMessage : ''"
+                    hint="Verifica conflitos com reservas já cadastradas."
+                    persistent-hint
                   />
                 </v-col>
               </v-row>
@@ -409,11 +529,16 @@ onMounted(async () => {
                 block
                 color="primary"
                 :loading="savingReservation"
-                :disabled="!formSpaceId || !formCustomerId"
+                :disabled="
+                  !formSpaceId ||
+                  !formCustomerId ||
+                  !formAdults ||
+                  adultsExceedCapacity ||
+                  hasTimeConflict
+                "
               >
                 Reservar
               </v-btn>
-
             </v-form>
           </v-card-text>
         </v-card>
@@ -422,7 +547,6 @@ onMounted(async () => {
       <!-- LISTA -->
       <v-col cols="12" md="7">
         <v-card elevation="2">
-
           <v-card-title class="d-flex align-center justify-space-between">
             <span class="text-subtitle-1 font-weight-medium">
               Reservas cadastradas
@@ -431,7 +555,7 @@ onMounted(async () => {
             <v-text-field
               v-model="filterDate"
               type="date"
-              label="Filtrar por entrada"
+              label="Filtrar por data"
               density="compact"
               hide-details
               style="max-width: 160px"
@@ -442,7 +566,6 @@ onMounted(async () => {
           <v-divider />
 
           <v-card-text class="pa-0">
-
             <v-data-table
               :items="reservations"
               :loading="loadingReservations"
@@ -454,6 +577,7 @@ onMounted(async () => {
                 { title: 'Início', key: 'start_time' },
                 { title: 'Fim', key: 'end_time' },
                 { title: 'Cliente', key: 'customer_id' },
+                { title: 'Adultos', key: 'adults_count' },
                 { title: 'Total (R$)', key: 'total_amount' },
                 { title: 'Status', key: 'status' },
               ]"
@@ -476,6 +600,10 @@ onMounted(async () => {
 
               <template #item.customer_id="{ value }">
                 {{ customerName(value) }}
+              </template>
+
+              <template #item.adults_count="{ value }">
+                {{ value ?? "—" }}
               </template>
 
               <template #item.total_amount="{ value }">
@@ -504,11 +632,9 @@ onMounted(async () => {
                 </div>
               </template>
             </v-data-table>
-
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
-
   </v-container>
 </template>

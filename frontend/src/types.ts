@@ -115,9 +115,9 @@ export type PaymentStatus =
   | 'REFUNDED'
   | string;
 
-export type PaymentMethod = 'Pix' | 'Cartão' | 'DInheiro' | 'Boleto' | string;
+export type PaymentMethod = 'PIX' | 'CARD' | 'CASH' | 'BOLETO' | string;
 
-export type PaymentPurpose = 'Depósito' | 'Saldo' | string;
+export type PaymentPurpose = 'DEPOSIT' | 'BALANCE' | string;
 
 export interface Payment {
   id: string;
