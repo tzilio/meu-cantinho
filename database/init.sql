@@ -75,6 +75,9 @@ CREATE TABLE reservations (
   start_time           TIME NOT NULL,
   end_time             TIME NOT NULL,
 
+  -- novo: número de adultos
+  adults_count         INT  NOT NULL,
+
   status               TEXT NOT NULL DEFAULT 'PENDING',
   total_amount         NUMERIC(10,2) NOT NULL,
   deposit_pct          NUMERIC(5,2) NOT NULL DEFAULT 0,
@@ -97,10 +100,13 @@ CREATE TABLE reservations (
     CHECK (check_out_date >= check_in_date),
 
   CONSTRAINT chk_reservations_amount
-    CHECK (total_amount >= 0)
+    CHECK (total_amount >= 0),
+
+  CONSTRAINT chk_reservations_adults
+    CHECK (adults_count > 0)
 );
 
--- Índices ajustados para o novo modelo (SEM date)
+-- Índices ajustados para o novo modelo (SEM date único)
 CREATE INDEX idx_reservations_space_checkin
   ON reservations (space_id, check_in_date, start_time);
 
