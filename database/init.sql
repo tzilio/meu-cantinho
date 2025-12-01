@@ -1,5 +1,5 @@
 -- ===========================================
--- Seu Cantinho - init.sql (versão corrigida)
+-- Seu Cantinho - init.sql 
 -- Branches + Spaces + Customers + Reservations + Payments
 -- ===========================================
 
